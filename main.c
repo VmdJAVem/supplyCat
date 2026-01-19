@@ -1,11 +1,12 @@
 #include <raylib.h>
 
-//constantes
+// constantes
 const int screenWidth = 600;
 const int screenHeight = 600;
 const int blocks = 8;
 const int blockSize = screenWidth / blocks;
-//Enums/Structs
+const char * initBoard = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
+// Enums/Structs
 typedef enum pieceType{
 	b_pawn, b_knight, b_bishop, b_rook, b_queen, b_king,
 	w_pawn, w_knight, w_bishop, w_rook, w_queen, w_king,
@@ -15,13 +16,15 @@ typedef enum pieceType{
 typedef struct ChessPieces{
 	Texture2D textures[pieceCount];
 }ChessPieces;
-//declaracion de funciones
+// declaracion de funciones
 void drawBoard();
 void loadChessPieces(ChessPieces * pieces);
 void unloadChessPieces(ChessPieces * pieces);
 PieceType getPiece(char piece);
+void drawPiece(Texture2D texture, int columna, int fila);
+void parseBoard(const char * board, ChessPieces * pieces);
 int main(){
-	//init general
+	// init general
 	InitWindow(screenWidth, screenHeight, "stockCat");
 	SetTargetFPS(60);
 	ChessPieces chessPieces;
@@ -31,14 +34,14 @@ int main(){
 		BeginDrawing();
         	ClearBackground(WHITE);
 		drawBoard();
-
+		parseBoard(initBoard, &chessPieces);
         	EndDrawing();
 	}
 	unloadChessPieces(&chessPieces);
 	CloseWindow();
 	return 0;
 }
-//funciones
+// funciones
 void drawBoard(){
 	for(int fila = 0; fila < blocks; fila++){
 		for(int columna = 0; columna < blocks; columna++){
@@ -53,19 +56,25 @@ void drawBoard(){
 	}
 }
 void loadChessPieces(ChessPieces * pieces){
-	pieces->textures[w_pawn] = LoadTexture("resources/8_bit/wp.png");
-	pieces->textures[w_knight] = LoadTexture("resources/8_bit/wk.png");
-	pieces->textures[w_bishop] = LoadTexture("resources/8_bit/wk.png");
-	pieces->textures[w_rook] = LoadTexture("resources/8_bit/wr.png");
-	pieces->textures[w_queen] = LoadTexture("resources/8_bit/wq.png");
-	pieces->textures[w_king] = LoadTexture("resources/8_bit/wk.png");
+	pieces->textures[w_pawn] = LoadTexture("resources/classic/wp.png");
+	pieces->textures[w_knight] = LoadTexture("resources/classic/wn.png");
+	pieces->textures[w_bishop] = LoadTexture("resources/classic/wb.png");
+	pieces->textures[w_rook] = LoadTexture("resources/classic/wr.png");
+	pieces->textures[w_queen] = LoadTexture("resources/classic/wq.png");
+	pieces->textures[w_king] = LoadTexture("resources/classic/wk.png");
 
-	pieces->textures[b_pawn] = LoadTexture("resources/8_bit/wp.png");
-	pieces->textures[b_knight] = LoadTexture("resources/8_bit/bk.png");
-	pieces->textures[b_bishop] = LoadTexture("resources/8_bit/bk.png");
-	pieces->textures[b_rook] = LoadTexture("resources/8_bit/br.png");
-	pieces->textures[b_queen] = LoadTexture("resources/8_bit/bq.png");
-	pieces->textures[b_king] = LoadTexture("resources/8_bit/bk.png");
+	pieces->textures[b_pawn] = LoadTexture("resources/classic/bp.png");
+	pieces->textures[b_knight] = LoadTexture("resources/classic/bn.png");
+	pieces->textures[b_bishop] = LoadTexture("resources/classic/bb.png");
+	pieces->textures[b_rook] = LoadTexture("resources/classic/br.png");
+	pieces->textures[b_queen] = LoadTexture("resources/classic/bq.png");
+	pieces->textures[b_king] = LoadTexture("resources/classic/bk.png");
+
+	for(int i = 0; i < pieceCount; i++){
+		if(pieces->textures[i].id == 0){
+			TraceLog(LOG_WARNING, "Failed to load textures  for pieces %d", i);
+		}
+	}
 }
 void unloadChessPieces(ChessPieces * pieces){
 	for(int i = 0; i < pieceCount; i++){
@@ -88,5 +97,41 @@ PieceType getPiece(char piece){
 		case 'K' : return w_king;
 		default : return EMPTY;
 
+	}
+}
+void drawPiece(Texture2D texture, int columna, int fila){
+	DrawTexturePro(
+		texture,
+		(Rectangle){0,0,(float)texture.width,(float) texture.height}, // Full Rectangle
+		(Rectangle){
+			columna * blockSize,
+			fila * blockSize,
+			blockSize,
+			blockSize
+		},
+		(Vector2){0,0}, // origin offset (no se necesita)
+		0.0f, // rotation
+		WHITE
+	);
+}
+void parseBoard(const char * board, ChessPieces * pieces){
+	int fila = 0; int columna = 0;
+	for(int i = 0;board[i] != '\0';i++){
+		char c = board[i];
+
+		if(c == '/'){
+			fila++;
+			columna = 0;
+		}
+		else if(c >= '1' && c <= '8'){
+			columna += (c - '0');
+		}
+		else{
+			PieceType p = getPiece(c);
+			if(p != EMPTY){
+				drawPiece(pieces->textures[p], columna,fila);
+				columna++;
+			}
+		}
 	}
 }
