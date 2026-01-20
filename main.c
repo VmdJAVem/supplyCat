@@ -1,9 +1,6 @@
 #include <raylib.h>
 #include <stdbool.h>
 
-#define RAYGUI_IMPLEMENTATION
-#include "raygui.h"
-
 // constantes
 const int screenWidth = 600;
 const int screenHeight = 600;
@@ -27,7 +24,6 @@ void unloadChessPieces(ChessPieces * pieces);
 PieceType getPiece(char piece);
 void drawPiece(Texture2D texture, int columna, int fila);
 void parseBoard(const char * board, ChessPieces * pieces);
-void gameOptions();
 int main(){
 	// init general
 	InitWindow(screenWidth, screenHeight, "stockCat");
@@ -138,9 +134,4 @@ void parseBoard(const char * board, ChessPieces * pieces){
 			}
 		}
 	}
-}
-void gameOptions(){
-	
-
-
 }
