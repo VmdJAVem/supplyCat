@@ -35,6 +35,7 @@ int main(){
 	ChessPieces chessPieces;
 	loadChessPieces(&chessPieces);
 	Texture2D quitBtn = LoadTexture("resources/sprites/quit.png");
+	Texture2D empateBtn = LoadTexture("resources/sprites/draw.png");
 	Texture2D background =  LoadTexture("resources/sprites/bg.png");
 
 	// inicializar el Vector2 que contiene la posicion del mouse
@@ -48,6 +49,7 @@ int main(){
 		DrawText("Score: 0-0",615, 40, 20, RAYWHITE);
 		DrawText("Playing",240, 615,25,RAYWHITE);
 		drawBtn(quitBtn,600,75);
+		drawBtn(empateBtn,600,150);
 		parseBoard(initBoard, &chessPieces);
         	EndDrawing();
 	}
