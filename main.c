@@ -2,10 +2,12 @@
 #include <stdbool.h>
 
 // constantes
-const int screenWidth = 600;
-const int screenHeight = 600;
+const int screenWitdh = 750; // espacio vacio 150 * 650
+const int screenHeight = 650;
+const int boardWitdh = 600;
+const int boardHeight = 600;
 const int blocks = 8;
-const int blockSize = screenWidth / blocks;
+const int blockSize = boardWitdh / blocks;
 const char * initBoard = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR";
 // Enums/Structs
 typedef enum pieceType{
@@ -24,16 +26,28 @@ void unloadChessPieces(ChessPieces * pieces);
 PieceType getPiece(char piece);
 void drawPiece(Texture2D texture, int columna, int fila);
 void parseBoard(const char * board, ChessPieces * pieces);
+void drawBtn(Texture2D btn, int x, int y);
+void drawbg(Texture2D bg);
 int main(){
 	// init general
-	InitWindow(screenWidth, screenHeight, "stockCat");
+	InitWindow(screenWitdh, screenHeight, "stockCat");
 	SetTargetFPS(60);
 	ChessPieces chessPieces;
 	loadChessPieces(&chessPieces);
+	Texture2D quitBtn = LoadTexture("resources/sprites/quit.png");
+	Texture2D background =  LoadTexture("resources/sprites/bg.png");
+
+	// inicializar el Vector2 que contiene la posicion del mouse
+	Vector2 mousePos = {0.0f, 0.0f};
 
 	while(!WindowShouldClose()){
-        	ClearBackground(WHITE);
+        	ClearBackground(BLACK);
+		drawbg(background);
 		drawBoard();
+		DrawText("White's turn", 615 , 10,20, RAYWHITE);
+		DrawText("Score: 0-0",615, 40, 20, RAYWHITE);
+		DrawText("Playing",240, 615,25,RAYWHITE);
+		drawBtn(quitBtn,600,75);
 		parseBoard(initBoard, &chessPieces);
         	EndDrawing();
 	}
@@ -134,4 +148,11 @@ void parseBoard(const char * board, ChessPieces * pieces){
 			}
 		}
 	}
+}
+void drawBtn(Texture2D btn, int x, int y){
+	DrawTexture(btn,x,y, RAYWHITE);
+
+}
+void drawbg(Texture2D bg){
+	DrawTexture(bg,0,0,RAYWHITE);
 }
