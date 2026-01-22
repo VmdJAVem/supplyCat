@@ -19,6 +19,7 @@ typedef enum pieceType{
 typedef struct ChessPieces{
 	Texture2D textures[pieceCount];
 }ChessPieces;
+// array de las piezas
 // declaracion de funciones
 void drawBoard();
 void loadChessPieces(ChessPieces * pieces);
@@ -54,6 +55,9 @@ int main(){
         	EndDrawing();
 	}
 	unloadChessPieces(&chessPieces);
+	UnloadTexture(quitBtn);
+	UnloadTexture(empateBtn);
+	UnloadTexture(background);
 	CloseWindow();
 	return 0;
 }
