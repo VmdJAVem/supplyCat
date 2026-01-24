@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <unistd.h>
 //importante
 typedef uint64_t bitboard;
 //macros
@@ -38,18 +39,36 @@ typedef struct{
 	bitboard allPieces[2];
 	bitboard allOccupiedSquares;
 }Tablero;
+//atack mascs
+bitboard knightAttacks[64];
+bitboard kingAttacks[64];
+bitboard pawnAttacks[2][64];
 // misc
 Tablero tablero;
 //funciones
 void printBitboard(bitboard bb);
 void initBoard(Tablero * t);
 void updateBoardCache(Tablero * t);
+bitboard computeKnightAttacks(casilla sq);
+bitboard computeKingAttacks(casilla sq);
+void initAttackTables();
 
 
 int main(){
 	initBoard(&tablero);
 	printBitboard(tablero.allOccupiedSquares);
-
+	initAttackTables();
+	printf("Knight's Attack:\n");
+	for(int i = 0;i < 64;i++){
+		printBitboard(knightAttacks[i]);
+		sleep(1);
+	}
+	sleep(5);
+	printf("Rey:\n");
+	for(int i = 0;i < 64;i++){
+		printBitboard(knightAttacks[i]);
+		sleep(1);
+	}
 	return 0;
 }
 //debug
@@ -102,3 +121,52 @@ void initBoard(Tablero * t){
 	t->piezas[negras][rey] = BB_SQUARE(e8);
 	updateBoardCache(t);
 }
+bitboard computeKnightAttacks(casilla sq){
+	int rank = sq / 8;
+	int file = sq % 8;
+	bitboard result = 0;
+	
+	int moves[8][2] = {
+		{2,1}, {2,-1}, {-2,1}, {-2,-1},
+		{1,2}, {1,-2}, {-1,2}, {-1,-2}
+	};
+	for(int i = 0; i < 8; i++){
+		int newRank = rank + moves[i][0];
+		int newFile = file + moves[i][1];
+
+		if(newRank >= 0 && newRank < 8 && newFile >= 0 && newFile < 8){
+			int destSquare = newRank * 8 + newFile;
+			result |= BB_SQUARE(destSquare);
+		}
+	}
+	return result;
+}
+bitboard computeKingAttacks(casilla sq){
+	int rank = sq / 8;
+	int file = sq % 8;
+	bitboard result = 0;
+
+	int moves[8][2] = {
+		{1,0}, {1,1}, {0,1},{-1,1},{-1,0},{-1,-1},{0,-1},{1,-1}
+	};
+	for(int i = 0; i < 8; i++){
+		int newRank = rank + moves[i][0];
+		int newFile = file + moves[i][1];
+		if(newRank >= 0 && newRank < 8 && newFile >= 0 && newFile < 8){
+			int destSquare = newRank * 8 + newFile;
+			result |= BB_SQUARE(destSquare);
+		}
+	}
+	return result;
+}
+void initAttackTables(){
+	//caballo
+	for(int i = 0; i < 64; i++){
+		knightAttacks[i] = computeKnightAttacks(i);
+	}
+	//rey
+	for(int i = 0; i < 64; i++){
+		kingAttacks[i] = computeKingAttacks(i);
+	}
+}
+
