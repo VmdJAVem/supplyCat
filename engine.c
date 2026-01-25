@@ -51,6 +51,7 @@ void initBoard(Tablero * t);
 void updateBoardCache(Tablero * t);
 bitboard computeKnightAttacks(casilla sq);
 bitboard computeKingAttacks(casilla sq);
+bitboard computePawnAttacks(color c,casilla sq);
 void initAttackTables();
 
 
@@ -66,7 +67,19 @@ int main(){
 	sleep(5);
 	printf("Rey:\n");
 	for(int i = 0;i < 64;i++){
-		printBitboard(knightAttacks[i]);
+		printBitboard(kingAttacks[i]);
+		sleep(1);
+	}
+	sleep(5);
+	printf("peon blanco:\n");
+	for(int j = 0;j < 64;j++){
+		printBitboard(pawnAttacks[blancas][j]);
+		sleep(1);
+	}
+	sleep(5);
+	printf("peon negro\n");
+	for(int j = 0;j < 64;j++){
+		printBitboard(pawnAttacks[negras][j]);
 		sleep(1);
 	}
 	return 0;
@@ -159,6 +172,28 @@ bitboard computeKingAttacks(casilla sq){
 	}
 	return result;
 }
+bitboard computePawnAttacks(color c, casilla sq){
+	int rank = sq / 8;
+	int file = sq % 8;
+	bitboard result = 0;
+	int moves[2][2][2] = {
+		{{1,-1}, {1,1}},
+		{{-1,-1}, {-1,1}}
+	};
+	int color = (c == blancas) ? 0 : 1;
+
+	for(int i = 0; i < 2;i++){
+		int newRank = rank + moves[color][i][0];
+		int newFile = file + moves[color][i][1];
+
+		if(newRank >= 0 && newRank < 8 && newFile >= 0 && newFile < 8){
+			int destSquare = newRank * 8 + newFile;
+			result |= BB_SQUARE(destSquare);
+		}
+	}
+
+	return result;
+}
 void initAttackTables(){
 	//caballo
 	for(int i = 0; i < 64; i++){
@@ -168,5 +203,9 @@ void initAttackTables(){
 	for(int i = 0; i < 64; i++){
 		kingAttacks[i] = computeKingAttacks(i);
 	}
+	//peon
+	for(int i = 0; i < 64; i++){
+		pawnAttacks[blancas][i] = computePawnAttacks(blancas,i);
+		pawnAttacks[negras][i] = computePawnAttacks(negras,i);
+	}
 }
-
