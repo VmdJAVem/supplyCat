@@ -239,6 +239,7 @@ void generateKnightMoves(moveLists * ml, color c,Tablero * t){
 					Move move = {i,j,caballo,capture,0};
 					ml->moves[ml->count] = move;
 					ml->count++;
+					capture = 0;
 
 				}
 			}
