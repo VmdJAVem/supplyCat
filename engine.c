@@ -19,12 +19,7 @@ typedef enum{
 typedef enum {
 	// Rank 1
 	a1, b1, c1, d1, e1, f1, g1, h1,
-	// Rank 2  
-	a2, b2, c2, d2, e2, f2, g2, h2,
-	// Rank 3
-	a3, b3, c3, d3, e3, f3, g3, h3,
-	// Rank 4
-	a4, b4, c4, d4, e4, f4, g4, h4,
+	// Rank 2  a2, b2, c2, d2, e2, f2, g2, h2, Rank 3 a3, b3, c3, d3, e3, f3, g3, h3, Rank 4 a4, b4, c4, d4, e4, f4, g4, h4,
 	// Rank 5
 	a5, b5, c5, d5, e5, f5, g5, h5,
 	// Rank 6
@@ -39,12 +34,26 @@ typedef struct{
 	bitboard allPieces[2];
 	bitboard allOccupiedSquares;
 }Tablero;
+typedef struct{
+	casilla from;
+	casilla to;
+	tipoDePieza piece;
+	int capture;
+	int special; // 0 normal, 1 en passant, 2 castling, 3 promo,
+}Move;
+typedef struct{
+	Move moves[256];
+	int count;
+}moveLists;
+
 //atack mascs
 bitboard knightAttacks[64];
 bitboard kingAttacks[64];
 bitboard pawnAttacks[2][64];
+
 // misc
 Tablero tablero;
+
 //funciones
 void printBitboard(bitboard bb);
 void initBoard(Tablero * t);
@@ -53,7 +62,7 @@ bitboard computeKnightAttacks(casilla sq);
 bitboard computeKingAttacks(casilla sq);
 bitboard computePawnAttacks(color c,casilla sq);
 void initAttackTables();
-
+void generateKnightMoves(moveLists * ml, color c,Tablero * t));
 
 int main(){
 	initBoard(&tablero);
@@ -207,5 +216,32 @@ void initAttackTables(){
 	for(int i = 0; i < 64; i++){
 		pawnAttacks[blancas][i] = computePawnAttacks(blancas,i);
 		pawnAttacks[negras][i] = computePawnAttacks(negras,i);
+	}
+}
+void generateKnightMoves(moveLists * ml, color c,Tablero * t){
+	bitboard allKnights  = t->piezas[c][caballo];
+	int capture = 0;
+	for(int i = 0; i < 64; i++){
+		if(allKnights  & (C64(1) << i)){
+			bitboard pseudoMoves = knightAttacks[i];
+			pseudoMoves &= (~t->allPieces[c]);
+			for(int j = 0; j < 64; j++){
+				if(pseudoMoves & (C64(1) << j)){
+					bitboard d = t->allPieces[!c];
+					if(BB_SQUARE(j) & d){
+						for(int piece = peon; piece <= rey; piece++){
+							if(t->piezas[!c][piece] & BB_SQUARE(j)){
+								capture = piece;
+								break;
+							}
+						}
+					}
+					Move move = {i,j,caballo,capture,0};
+					ml->moves[ml->count] = move;
+					ml->count++;
+
+				}
+			}
+		}
 	}
 }
