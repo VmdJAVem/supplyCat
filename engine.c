@@ -220,13 +220,13 @@ void initAttackTables(){
 }
 void generateKnightMoves(moveLists * ml, color c,Tablero * t){
 	bitboard allKnights  = t->piezas[c][caballo];
-	int capture = 0;
 	for(int i = 0; i < 64; i++){
 		if(allKnights  & (C64(1) << i)){
 			bitboard pseudoMoves = knightAttacks[i];
 			pseudoMoves &= (~t->allPieces[c]);
 			for(int j = 0; j < 64; j++){
 				if(pseudoMoves & (C64(1) << j)){
+					int capture = 0;
 					bitboard d = t->allPieces[!c];
 					if(BB_SQUARE(j) & d){
 						for(int piece = peon; piece <= rey; piece++){
@@ -239,8 +239,6 @@ void generateKnightMoves(moveLists * ml, color c,Tablero * t){
 					Move move = {i,j,caballo,capture,0};
 					ml->moves[ml->count] = move;
 					ml->count++;
-					capture = 0;
-
 				}
 			}
 		}
