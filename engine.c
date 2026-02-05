@@ -64,6 +64,7 @@ bitboard computePawnAttacks(color c,casilla sq);
 void initAttackTables();
 void generateKnightMoves(moveLists * ml, color c,Tablero * t);
 void generateKingMoves(moveLists * ml, color c, Tablero * t);
+void generatePawnMoves(moveLists * ml, color c, Tablero * t);
 
 int main(){
 	initBoard(&tablero);
@@ -221,37 +222,42 @@ void initAttackTables(){
 }
 void generateKnightMoves(moveLists * ml, color c,Tablero * t){
 	bitboard allKnights  = t->piezas[c][caballo];
-	for(int i = 0; i < 64; i++){
-		if(allKnights  & (C64(1) << i)){
-			bitboard pseudoMoves = knightAttacks[i];
-			pseudoMoves &= (~t->allPieces[c]);
-			for(int j = 0; j < 64; j++){
-				if(pseudoMoves & (C64(1) << j)){
-					int capture = 0;
-					if(BB_SQUARE(j) & t->allPieces[!c]){
-						for(int piece = peon; piece <= rey; piece++){
-							if(t->piezas[!c][piece] & BB_SQUARE(j)){
-								capture = piece;
-								break;
-							}
-						}
+	while(allKnights){
+		casilla from = __builtin_ctzll(allKnights);
+		allKnights &= (allKnights - 1);
+		bitboard attacks = knightAttacks[from];
+		while(attacks){
+			casilla to = __builtin_ctzll(attacks);
+			attacks &= (attacks - 1);
+			int capture = 0;
+			if(BB_SQUARE(to) & t->allPieces[!c]){
+				for(int piece = peon; piece <= rey; piece++){
+					if(t->piezas[!c][piece] & BB_SQUARE(to)){
+						capture = piece;
+						break;
 					}
-					Move move = {i,j,caballo,capture,0};
-					ml->moves[ml->count] = move;
-					ml->count++;
 				}
 			}
+			Move move = {from,to,caballo,capture,0};
+			ml->moves[ml->count] = move;
+			ml->count++;
 		}
 	}
+
 }
 void generateKingMoves(moveLists * ml, color c, Tablero * t){
-	//TODO: castling
+	/*
+	TODO: castling
+	*/
 	bitboard king = t->piezas[c][rey];
 	if(king == 0){
 		// this should NOT happen
 		return;
 	}
-	int from = __builtin_ctzll(king);
+	if(king & (king - 1)){
+		return;
+	}
+	casilla from = __builtin_ctzll(king);
 
 	bitboard attacks = kingAttacks[from] & (~t->allPieces[c]);
 	for(int i = 0; i < 64; i++){
@@ -270,4 +276,72 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 			}
 		}
 	}
+}
+void generatePawnMoves(moveLists * ml, color c, Tablero * t){
+	bitboard allPawns = t->piezas[c][peon];
+	/*
+	TODO: En passant
+	TODO: Promotion
+	*/
+	while(allPawns){
+		casilla from = __builtin_ctzll(allPawns);
+		allPawns &= (allPawns - 1);
+		casilla to = 0;
+		casilla rank = from / 8;
+		bitboard pawnAttacksLocal = pawnAttacks[c][from];
+		if(c == blancas){
+			to =  from + 8;
+		}
+		else if(c == negras){
+			to = from - 8;
+		}
+		if(to < 64 && to >= 0){
+			if(BB_SQUARE(to) & (~t->allOccupiedSquares)){
+				if(to / 8 == 1 || to / 8 == 6){
+					/*
+					TODO: here the happens the promotion
+					*/
+					Move move = {from,to,peon,0,0};
+					ml->moves[ml->count] = move;
+					ml->count++;
+				}
+				else{
+					Move move = {from,to,peon,0,0};
+					ml->moves[ml->count] = move;
+					ml->count++;
+				}
+			}
+		}
+		if(pawnAttacksLocal & t->allPieces[!c]){
+			pawnAttacksLocal &= t->allPieces[!c];
+			while(pawnAttacksLocal){
+				int capture = 0;
+				if(pawnAttacksLocal & t->allPieces[!c]){
+					to = __builtin_ctzll(pawnAttacksLocal);
+					pawnAttacksLocal &= (pawnAttacksLocal - 1);
+					for(int piece = peon; piece <= rey; piece++){
+						if(t->piezas[!c][piece] & BB_SQUARE(to)){
+							capture = piece;
+							break;
+						}
+					}
+					Move move = {from,to,peon,capture,0};
+					ml->moves[ml->count] = move;
+					ml->count++;
+				}
+			}
+		}
+		if((rank == 1) || (rank == 6)){
+			if(c == blancas && !(t->allOccupiedSquares & BB_SQUARE(from + 8)) && !(t->allOccupiedSquares & BB_SQUARE(from + 16))){
+				to = from + 16;
+			}
+			else if(c == negras && !(t->allOccupiedSquares & BB_SQUARE(from - 8)) && !(t->allOccupiedSquares & BB_SQUARE(from - 16))){
+				to = from - 16;
+			}
+			Move move = {from,to,peon,0,0};
+			ml->moves[ml->count] = move;
+			ml->count++;
+		}
+	}
+	
 }
