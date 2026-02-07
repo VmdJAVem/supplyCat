@@ -52,6 +52,7 @@ bitboard kingAttacks[64];
 bitboard pawnAttacks[2][64];
 //sliding pieces offsets
 int rookOffsets[4] = {8,-8,-1,1}; // up, down, left, right
+int bishopOffsets[4] = {-9,-7,7,9} //up-left, up-right,down-left,down-right
 // misc
 Tablero tablero;
 
@@ -67,6 +68,7 @@ void generateKnightMoves(moveLists * ml, color c,Tablero * t);
 void generateKingMoves(moveLists * ml, color c, Tablero * t);
 void generatePawnMoves(moveLists * ml, color c, Tablero * t);
 void generateRookMoves(moveLists * ml, color c, Tablero * t);
+void generateBishopMoves(moveLists * ml, color c, Tablero * t);
 
 int main(){
 	initBoard(&tablero);
@@ -450,6 +452,18 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t){
 						ml->count++;
 					}
 				}
+			}
+		}
+	}
+	void generateBishopMoves(moveLists * ml, color c, Tablero * t){
+		bitboard allBishops = t->[c][alfil];
+		while(allBishops){
+			casilla from = __builtin_ctzll(allBishops);
+			allBishops &= (allBishops - 1);
+			for(int i = 0; i < 4; i++){
+				int offset = bishopOffsets[i];
+				if()
+
 			}
 		}
 	}
