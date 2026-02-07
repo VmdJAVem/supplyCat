@@ -353,104 +353,30 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t){
 		allRooks &= (allRooks - 1);
 		for(int i = 0; i < 4; i++){
 			int offset = rookOffsets[i];
-			if(i == 0){ // up
-				while((from + offset) < 64){
-					casilla to = from + offset;
-					int capture = 0;
-					if(BB_SQUARE(to) & t->allPieces[!c]){
-						for(int piece = peon; piece <= rey; piece++){
-							if(t->piezas[!c][piece] & BB_SQUARE(to)){
-								capture = piece;
-								Move move = {from, to, capture, 0};
-								ml->moves[ml->count] = move;
-								ml->count++;
-								break;
-							}
+			casilla to = from + offset;
+			while((to < 64) && (to < 64)){
+				if((offset == 1 || offset == -1) && (to / 8) != (from / 8)){
+					break;
+				}
+				int capture = 0;
+				if(BB_SQUARE(to) & t->allPieces[!c]){
+					for(int piece = peon; piece <= rey; piece++){
+						if(t->piezas[!c][piece] & BB_SQUARE(to)){
+							capture = piece;
+							Move move = {from, to, capture, 0};
+							ml->moves[ml->count] = move;
+							ml->count++;
+							break;
 						}
-					}
-					else if(t->piezas[c][piece] & BB_SQUARE(to))){
-						break;
-					}
-					else{
-						Move move = {from, to, capture, 0};
-						ml->moves[ml->count] = move;
-						ml->count++;
 					}
 				}
-			}
-			else if(i == 1){ // down
-				while((from + offset) >= 0){
-					casilla to = from + offset;
-					int capture = 0;
-					if(BB_SQUARE(to) & t->allPieces[!c]){
-						for(int piece = peon; i <= piece; piece++){
-							if(t->piezas[!c][piece] & BB_SQUARE(to)){
-								capture = piece;
-								Move move = {from, to, capture, 0};
-								ml->moves[ml->count] = move;
-								ml->count++;
-								break;
-							}
-						}
-					}
-					else if(t->piezas[c][piece] & BB_SQUARE(to))){
-						break;
-					}
-					else{
-						Move move = {from, to, capture, 0};
-						ml->moves[ml->count] = move;
-						ml->count++;
-					}
+				else if(t->piezas[c][piece] & BB_SQUARE(to))){
+					break;
 				}
-			}
-			else if(i == 2){ // left 
-				while((from % 8) > 0){
-					casilla to = from + offset;
-					int capture = 0;
-					if(BB_SQUARE(to) & t->allPieces[!c]){
-						for(int piece = peon; piece <= rey; piece++){
-							if(t->piezas[!c][piece] & BB_SQUARE(to)){
-								capture = piece;
-								Move move = {from, to, capture, 0};
-								ml->moves[ml->count] = move;
-								ml->count++;
-								break;
-							}
-						}
-					}
-					else if(t->piezas[c][piece] & BB_SQUARE(to))){
-						break;
-					}
-					else{
-						Move move = {from, to, capture, 0};
-						ml->moves[ml->count] = move;
-						ml->count++;
-					}
-				}
-			}
-			else if(i == 3){ // right
-				while((from % 8) < 7){
-					casilla to = from + offset;
-					int capture = 0;
-					if(BB_SQUARE(to) & t->allPieces[!c]){
-						for(int piece = peon; piece <= rey; piece++){
-							if(t->piezas[!c][piece] & BB_SQUARE(to)){
-								capture = piece;
-								Move move = {from, to, capture, 0};
-								ml->moves[ml->count] = move;
-								ml->count++;
-								break;
-							}
-						}
-					}
-					else if(t->piezas[c][piece] & BB_SQUARE(to))){
-						break;
-					}
-					else{
-						Move move = {from, to, capture, 0};
-						ml->moves[ml->count] = move;
-						ml->count++;
-					}
+				else{
+					Move move = {from, to, capture, 0};
+					ml->moves[ml->count] = move;
+					ml->count++;
 				}
 			}
 		}
@@ -462,7 +388,10 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t){
 			allBishops &= (allBishops - 1);
 			for(int i = 0; i < 4; i++){
 				int offset = bishopOffsets[i];
-				if()
+				casilla to = from + offset;
+				while(){
+
+				}
 
 			}
 		}
