@@ -50,7 +50,8 @@ typedef struct{
 bitboard knightAttacks[64];
 bitboard kingAttacks[64];
 bitboard pawnAttacks[2][64];
-
+//sliding pieces offsets
+int rookOffsets[4] = {8,-8,-1,1}; // up, down, left, right
 // misc
 Tablero tablero;
 
@@ -65,6 +66,7 @@ void initAttackTables();
 void generateKnightMoves(moveLists * ml, color c,Tablero * t);
 void generateKingMoves(moveLists * ml, color c, Tablero * t);
 void generatePawnMoves(moveLists * ml, color c, Tablero * t);
+void generateRookMoves(moveLists * ml, color c, Tablero * t);
 
 int main(){
 	initBoard(&tablero);
@@ -281,7 +283,6 @@ void generatePawnMoves(moveLists * ml, color c, Tablero * t){
 	bitboard allPawns = t->piezas[c][peon];
 	/*
 	TODO: En passant
-	TODO: Promotion
 	*/
 	while(allPawns){
 		casilla from = __builtin_ctzll(allPawns);
@@ -297,13 +298,12 @@ void generatePawnMoves(moveLists * ml, color c, Tablero * t){
 		}
 		if(to < 64 && to >= 0){
 			if(BB_SQUARE(to) & (~t->allOccupiedSquares)){
-				if(to / 8 == 1 || to / 8 == 6){
-					/*
-					TODO: here the happens the promotion
-					*/
-					Move move = {from,to,peon,0,0};
-					ml->moves[ml->count] = move;
-					ml->count++;
+				if((to / 8 == 1 && c == negras ) || (to / 8 == 6 && c == blancas)){
+					for(int i = caballo; i < rey; i++){
+						Move move = {from,to,i,0,0};
+						ml->moves[ml->count] = move;
+						ml->count++;
+					}
 				}
 				else{
 					Move move = {from,to,peon,0,0};
@@ -343,5 +343,114 @@ void generatePawnMoves(moveLists * ml, color c, Tablero * t){
 			ml->count++;
 		}
 	}
-	
+}
+void generateRookMoves(moveLists * ml, color c, Tablero * t){
+	bitboard allRooks = (t->piezas[c][torre]);
+	while(allRooks){
+		casilla from = __builtin_ctzll(allRooks);
+		allRooks &= (allRooks - 1);
+		for(int i = 0; i < 4; i++){
+			int offset = rookOffsets[i];
+			if(i == 0){ // up
+				while((from + offset) < 64){
+					casilla to = from + offset;
+					int capture = 0;
+					if(BB_SQUARE(to) & t->allPieces[!c]){
+						for(int piece = peon; piece <= rey; piece++){
+							if(t->piezas[!c][piece] & BB_SQUARE(to)){
+								capture = piece;
+								Move move = {from, to, capture, 0};
+								ml->moves[ml->count] = move;
+								ml->count++;
+								break;
+							}
+						}
+					}
+					else if(t->piezas[c][piece] & BB_SQUARE(to))){
+						break;
+					}
+					else{
+						Move move = {from, to, capture, 0};
+						ml->moves[ml->count] = move;
+						ml->count++;
+					}
+				}
+			}
+			else if(i == 1){ // down
+				while((from + offset) >= 0){
+					casilla to = from + offset;
+					int capture = 0;
+					if(BB_SQUARE(to) & t->allPieces[!c]){
+						for(int piece = peon; i <= piece; piece++){
+							if(t->piezas[!c][piece] & BB_SQUARE(to)){
+								capture = piece;
+								Move move = {from, to, capture, 0};
+								ml->moves[ml->count] = move;
+								ml->count++;
+								break;
+							}
+						}
+					}
+					else if(t->piezas[c][piece] & BB_SQUARE(to))){
+						break;
+					}
+					else{
+						Move move = {from, to, capture, 0};
+						ml->moves[ml->count] = move;
+						ml->count++;
+					}
+				}
+			}
+			else if(i == 2){ // left 
+				while((from % 8) > 0){
+					casilla to = from + offset;
+					int capture = 0;
+					if(BB_SQUARE(to) & t->allPieces[!c]){
+						for(int piece = peon; piece <= rey; piece++){
+							if(t->piezas[!c][piece] & BB_SQUARE(to)){
+								capture = piece;
+								Move move = {from, to, capture, 0};
+								ml->moves[ml->count] = move;
+								ml->count++;
+								break;
+							}
+						}
+					}
+					else if(t->piezas[c][piece] & BB_SQUARE(to))){
+						break;
+					}
+					else{
+						Move move = {from, to, capture, 0};
+						ml->moves[ml->count] = move;
+						ml->count++;
+					}
+				}
+			}
+			else if(i == 3){ // right
+				while((from % 8) < 7){
+					casilla to = from + offset;
+					int capture = 0;
+					if(BB_SQUARE(to) & t->allPieces[!c]){
+						for(int piece = peon; piece <= rey; piece++){
+							if(t->piezas[!c][piece] & BB_SQUARE(to)){
+								capture = piece;
+								Move move = {from, to, capture, 0};
+								ml->moves[ml->count] = move;
+								ml->count++;
+								break;
+							}
+						}
+					}
+					else if(t->piezas[c][piece] & BB_SQUARE(to))){
+						break;
+					}
+					else{
+						Move move = {from, to, capture, 0};
+						ml->moves[ml->count] = move;
+						ml->count++;
+					}
+				}
+			}
+		}
+	}
 }
