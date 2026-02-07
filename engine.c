@@ -354,7 +354,7 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t){
 		for(int i = 0; i < 4; i++){
 			int offset = rookOffsets[i];
 			casilla to = from + offset;
-			while((to < 64) && (to < 64)){
+			while((to >= 0) && (to < 64)){
 				if((offset == 1 || offset == -1) && (to / 8) != (from / 8)){
 					break;
 				}
@@ -389,8 +389,8 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t){
 			for(int i = 0; i < 4; i++){
 				int offset = bishopOffsets[i];
 				casilla to = from + offset;
-				while(){
-
+				while((to >= 0) && (to < 64)){
+					
 				}
 
 			}
