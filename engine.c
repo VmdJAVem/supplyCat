@@ -271,7 +271,9 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 		return;
 	}
 	casilla from = __builtin_ctzll(king);
-
+	/*
+	TODO: atack checking
+	 */
 	bitboard attacks = kingAttacks[from] & (~t->allPieces[c]);
 	for(int i = 0; i < 64; i++){
 		if(attacks & (C64(1) << i)){
@@ -287,7 +289,12 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 				ml->moves[ml->count] = move;
 				ml->count++;
 			}
-			
+			else{
+				Move move = {from,i,rey,capture,0,0};
+				ml->moves[ml->count] = move;
+				ml->count++;
+			}
+
 		}
 	}
 	//castling ROOKS IS HANDLED WHEN MAKING MOVE
@@ -300,7 +307,7 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 			casilla rook = __builtin_ctzll(rooks);
 			rooks &= (rooks - 1);
 			if(rook == h1 && (t->castlingRights[c] == 0 || t->castlingRights[c] == 1)){
-				for(casilla sq = f1; sq < h1 ;sq++){
+				for(casilla sq = f1; sq < h1; sq++){
 					if(BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c])){
 						canCastleKingSide = false;
 					}
@@ -312,31 +319,47 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 					ml->count++;
 				}
 			}
-			else if(rook == a1 && (t->castlingRights[c] == 0 || t->castlingRights[c] == 1)){
-				for(casilla sq = d1; sq < a1;sq--){
+			else if(rook == a1 && (t->castlingRights[c] == 0 || t->castlingRights[c] == 2)){
+				for(casilla sq = d1; sq > a1;sq--){
 					if(BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c])){
 						canCastleQueenSide = false;
 					}
 				}
-				casilla to = c1;
-				Move move = {from,to,rey,0,2,0};
-				ml->moves[ml->count] = move;
-				ml->count++;
+				if(canCastleQueenSide){
+					casilla to = c1;
+					Move move = {from,to,rey,0,2,0};
+					ml->moves[ml->count] = move;
+					ml->count++;
+				}
 			}
 			else{
 				printf("error on castling move generation, prolly an invalid square: %d\n",rook);
 			}
 		}
 	}
-	else if(c == negras && from == e8){
+	if(c == negras && from == e8){
 		bitboard rooks = t->piezas[c][torre];
 		while(rooks){
 			casilla rook = __builtin_ctzll(rooks);
 			rooks &= (rooks - 1);
+			bool canCastleQueenSide = true;
+			bool canCastleKingSide = true;
+			if(rook == h8 && (t->castlingRights[c] == 0 || t->castlingRights[c] == 1)){
+				for(casilla sq = f8; sq < h8; sq++){
+					if(BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c])){
+						canCastleKingSide = false;
+					}
+				}
 
-
-			if(rook == a8 && (t->castlingRights[c] == 0 || t->castlingRights[c] == 1)){
-				for(casilla sq = d8; sq > a8;sq--){
+				if(canCastleKingSide){
+					casilla to = g8;
+					Move move = {from,to,rey,0,2,0};
+					ml->moves[ml->count] = move;
+					ml->count++;
+				}
+			}
+			if(rook == a8 && (t->castlingRights[c] == 0 || t->castlingRights[c] == 2)){
+				for(casilla sq = d8; sq > a8; sq--){
 					if(BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c])){
 						canCastleQueenSide = false;
 					}
@@ -347,19 +370,6 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 					ml->moves[ml->count] = move;
 					ml->count++;
 				}
-			}
-			else if(rook == h8 && (t->castlingRights[c] == 0 || t->castlingRights[c] == 1)){
-				for(casilla sq = f8; sq < h8; sq++){
-					if(BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c])){
-						canCastleKingSide = false;
-					}
-				}
-			}
-			if(canCastleKingSide){
-				casilla to = g8;
-				Move move = {from,to,rey,0,2,0};
-				ml->moves[ml->count] = move;
-				ml->count++;
 			}
 			else{
 				printf("error on castling move generation, prolly an invalid square: %d\n",rook);
@@ -470,104 +480,104 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t){
 			}
 		}
 	}
-	void generateBishopMoves(moveLists * ml, color c, Tablero * t){
-		bitboard allBishops = t->piezas[c][alfil];
-		while(allBishops){
-			casilla from = __builtin_ctzll(allBishops);
-			allBishops &= (allBishops - 1);
-			for(int i = 0; i < 4; i++){
-				int offset = bishopOffsets[i];
-				casilla to = from + offset;
-				while((to >= 0) && (to < 64)){
-					if(abs((from % 8) - (to % 8)) != abs((from / 8) - (to / 8))){
-						break;
-					}
-					int capture  =  0;
-					if(BB_SQUARE(to) & t->allPieces[!c]){
-						for(int piece =  peon; piece <= rey; piece++){
-							if(t->piezas[!c][piece] & BB_SQUARE(to)){
-								capture = piece;
-								Move move = {from,to,capture,0,0};
-								ml->moves[ml->count] = move;
-								ml->count++;
-								break; // should exit while((to >= 0) && (to < 64))
-							}
+}
+void generateBishopMoves(moveLists * ml, color c, Tablero * t){
+	bitboard allBishops = t->piezas[c][alfil];
+	while(allBishops){
+		casilla from = __builtin_ctzll(allBishops);
+		allBishops &= (allBishops - 1);
+		for(int i = 0; i < 4; i++){
+			int offset = bishopOffsets[i];
+			casilla to = from + offset;
+			while((to >= 0) && (to < 64)){
+				if(abs((from % 8) - (to % 8)) != abs((from / 8) - (to / 8))){
+					break;
+				}
+				int capture  =  0;
+				if(BB_SQUARE(to) & t->allPieces[!c]){
+					for(int piece =  peon; piece <= rey; piece++){
+						if(t->piezas[!c][piece] & BB_SQUARE(to)){
+							capture = piece;
+							Move move = {from,to,capture,0,0};
+							ml->moves[ml->count] = move;
+							ml->count++;
+							break; // should exit while((to >= 0) && (to < 64))
 						}
 					}
-					else if(BB_SQUARE(to) & t->allPieces[c]){
-						break;
-					}
-					else{
-						Move move = {from,to,capture,0,0};
-						ml->moves[ml->count] = move;
-						ml->count++;
-					}
+				}
+				else if(BB_SQUARE(to) & t->allPieces[c]){
+					break;
+				}
+				else{
+					Move move = {from,to,capture,0,0};
+					ml->moves[ml->count] = move;
+					ml->count++;
 				}
 			}
 		}
 	}
-	void generateQueenMoves(moveLists * ml, color c, Tablero * t){
-		bitboard allQueens  =  t->piezas[c][alfil];
-		while(allQueens){
-			casilla  from = __builtin_ctzll(allQueens);
-			allQueens &= (allQueens - 1);
-			for(int i = 0; i < 4; i++){
-				int offset = bishopOffsets[i];
-				casilla to = from + offset;
-				while((to >= 0) && (to < 64)){
-					if(abs((from % 8) - (to % 8)) != abs((from / 8) - (to / 8))){
-						break;
-					}
-					int capture = 0;
-					if(BB_SQUARE(to) & t->allPieces[!c]){
-						for(int piece =  peon; piece <= rey; piece++){
-							if(t->piezas[!c][piece] & BB_SQUARE(to)){
-								capture = piece;
-								Move move = {from,to,capture,0,0};
-								ml->moves[ml->count] = move;
-								ml->count++;
-								break; // should exit while((to >= 0) && (to < 64))
-							}
+}
+void generateQueenMoves(moveLists * ml, color c, Tablero * t){
+	bitboard allQueens  =  t->piezas[c][alfil];
+	while(allQueens){
+		casilla  from = __builtin_ctzll(allQueens);
+		allQueens &= (allQueens - 1);
+		for(int i = 0; i < 4; i++){
+			int offset = bishopOffsets[i];
+			casilla to = from + offset;
+			while((to >= 0) && (to < 64)){
+				if(abs((from % 8) - (to % 8)) != abs((from / 8) - (to / 8))){
+					break;
+				}
+				int capture = 0;
+				if(BB_SQUARE(to) & t->allPieces[!c]){
+					for(int piece =  peon; piece <= rey; piece++){
+						if(t->piezas[!c][piece] & BB_SQUARE(to)){
+							capture = piece;
+							Move move = {from,to,capture,0,0};
+							ml->moves[ml->count] = move;
+							ml->count++;
+							break; // should exit while((to >= 0) && (to < 64))
 						}
+					}
 
-					}
-					else if(BB_SQUARE(to) & t->allPieces[c]){
-						break;
-					}
-					else{
-						Move move = {from,to,capture,0,0};
-						ml->moves[ml->count] = move;
-						ml->count++;
-					}
+				}
+				else if(BB_SQUARE(to) & t->allPieces[c]){
+					break;
+				}
+				else{
+					Move move = {from,to,capture,0,0};
+					ml->moves[ml->count] = move;
+					ml->count++;
 				}
 			}
-			for(int i = 0; i < 4; i++){
-				int offset = rookOffsets[i];
-				casilla to = from + offset;
-				while((to >= 0) && (to < 64)){
-					if((offset == 1 || offset == -1) && (to / 8) != (from / 8)){
-						break;
-					}
-					int capture = 0;
-					if(BB_SQUARE(to) & t->allPieces[!c]){
-						for(int piece = peon; piece <= rey; piece++){
-							if(t->piezas[!c][piece] & BB_SQUARE(to)){
-								capture = piece;
-								Move move = {from, to, capture, 0,0};
-								ml->moves[ml->count] = move;
-								ml->count++;
-								break;
-							}
+		}
+		for(int i = 0; i < 4; i++){
+			int offset = rookOffsets[i];
+			casilla to = from + offset;
+			while((to >= 0) && (to < 64)){
+				if((offset == 1 || offset == -1) && (to / 8) != (from / 8)){
+					break;
+				}
+				int capture = 0;
+				if(BB_SQUARE(to) & t->allPieces[!c]){
+					for(int piece = peon; piece <= rey; piece++){
+						if(t->piezas[!c][piece] & BB_SQUARE(to)){
+							capture = piece;
+							Move move = {from, to, capture, 0,0};
+							ml->moves[ml->count] = move;
+							ml->count++;
+							break;
 						}
 					}
-					else if(t->allPieces[c] & BB_SQUARE(to)){
-						break;
-					}
-					else{
-						Move move = {from, to, capture, 0, 0};
-						ml->moves[ml->count] = move;
-						ml->count++;
-					}
+				}
+				else if(t->allPieces[c] & BB_SQUARE(to)){
+					break;
+				}
+				else{
+					Move move = {from, to, capture, 0, 0};
+					ml->moves[ml->count] = move;
+					ml->count++;
 				}
 			}
 		}
