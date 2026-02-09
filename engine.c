@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdlib.h>
 //importante
 typedef uint64_t bitboard;
 //macros
@@ -19,7 +20,12 @@ typedef enum{
 typedef enum {
 	// Rank 1
 	a1, b1, c1, d1, e1, f1, g1, h1,
-	// Rank 2  a2, b2, c2, d2, e2, f2, g2, h2, Rank 3 a3, b3, c3, d3, e3, f3, g3, h3, Rank 4 a4, b4, c4, d4, e4, f4, g4, h4,
+	// Rank 2
+	a2, b2, c2, d2, e2, f2, g2, h2,
+	// Rank 3
+	a3, b3, c3, d3, e3, f3, g3, h3,
+	// Rank 4
+	a4, b4, c4, d4, e4, f4, g4, h4,
 	// Rank 5
 	a5, b5, c5, d5, e5, f5, g5, h5,
 	// Rank 6
@@ -52,7 +58,7 @@ bitboard kingAttacks[64];
 bitboard pawnAttacks[2][64];
 //sliding pieces offsets
 int rookOffsets[4] = {8,-8,-1,1}; // up, down, left, right
-int bishopOffsets[4] = {-9,-7,7,9} //up-left, up-right,down-left,down-right
+int bishopOffsets[4] = {-9,-7,7,9}; //up-left, up-right,down-left,down-right
 // misc
 Tablero tablero;
 
@@ -370,9 +376,10 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t){
 						}
 					}
 				}
-				else if(t->piezas[c][piece] & BB_SQUARE(to))){
+				else if(t->allPieces[c] & BB_SQUARE(to)){
 					break;
 				}
+
 				else{
 					Move move = {from, to, capture, 0};
 					ml->moves[ml->count] = move;
@@ -382,7 +389,7 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t){
 		}
 	}
 	void generateBishopMoves(moveLists * ml, color c, Tablero * t){
-		bitboard allBishops = t->[c][alfil];
+		bitboard allBishops = t->piezas[c][alfil];
 		while(allBishops){
 			casilla from = __builtin_ctzll(allBishops);
 			allBishops &= (allBishops - 1);
@@ -390,7 +397,7 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t){
 				int offset = bishopOffsets[i];
 				casilla to = from + offset;
 				while((to >= 0) && (to < 64)){
-					if(abs((from % 8) - (to % 8)) != abs((from / 8) - (to / 8)){
+					if(abs((from % 8) - (to % 8)) != abs((from / 8) - (to / 8))){
 						break;
 					}
 					int capture  =  0;
@@ -418,7 +425,7 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t){
 		}
 	}
 	void generateQueenMoves(moveLists * ml, color c, Tablero * t){
-		bitboard allQueens  =  t->[c][alfil];
+		bitboard allQueens  =  t->piezas[c][alfil];
 		while(allQueens){
 			casilla  from = __builtin_ctzll(allQueens);
 			allQueens &= (allQueens - 1);
@@ -426,7 +433,7 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t){
 				int offset = bishopOffsets[i];
 				casilla to = from + offset;
 				while((to >= 0) && (to < 64)){
-					if(abs((from % 8) - (to % 8)) != abs((from / 8) - (to / 8)){
+					if(abs((from % 8) - (to % 8)) != abs((from / 8) - (to / 8))){
 						break;
 					}
 					int capture = 0;
@@ -471,11 +478,11 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t){
 							}
 						}
 					}
-					else if(t->piezas[c][piece] & BB_SQUARE(to))){
+					else if(t->allPieces[c] & BB_SQUARE(to)){
 						break;
 					}
 					else{
-						Move move = {from, to, capture, 0};
+						Move move = {from, to, capture, 2};
 						ml->moves[ml->count] = move;
 						ml->count++;
 					}
