@@ -39,6 +39,7 @@ typedef struct{
 	bitboard piezas[2][6];
 	bitboard allPieces[2];
 	bitboard allOccupiedSquares;
+	int castlingRights[2]; // 0: no rooks or king move, 1: h: a rank rook already moved 2: h rank rook moved 3: king moved 4: all rooks moved 5: everything moved
 }Tablero;
 typedef struct{
 	casilla from;
@@ -46,6 +47,7 @@ typedef struct{
 	tipoDePieza piece;
 	int capture;
 	int special; // 0 normal, 1 en passant, 2 castling, 3 promo,
+	int promoPiece; // 0 none
 }Move;
 typedef struct{
 	Move moves[256];
@@ -60,8 +62,12 @@ bitboard pawnAttacks[2][64];
 int rookOffsets[4] = {8,-8,-1,1}; // up, down, left, right
 int bishopOffsets[4] = {-9,-7,7,9}; //up-left, up-right,down-left,down-right
 // misc
-Tablero tablero;
-
+Tablero tablero =  {
+	.piezas = {{0}},
+	.allPieces = {0},
+	.allOccupiedSquares = 0,
+	.castlingRights = {0,0}
+};
 //funciones
 void printBitboard(bitboard bb);
 void initBoard(Tablero * t);
@@ -118,23 +124,6 @@ void printBitboard(bitboard bb){
 	}
 	printf("  a b c d e f g h\n\n");
 }
-void updateBoardCache(Tablero * t){
-	t->allPieces[blancas] = t->piezas[blancas][peon]|
-		t->piezas[blancas][caballo]|
-		t->piezas[blancas][alfil]|
-		t->piezas[blancas][torre]|
-		t->piezas[blancas][reina]|
-		t->piezas[blancas][rey];
-
-
-	t->allPieces[negras] = t->piezas[negras][peon]|
-		t->piezas[negras][caballo]|
-		t->piezas[negras][alfil]|
-		t->piezas[negras][torre]|
-		t->piezas[negras][reina]|
-		t->piezas[negras][rey];
-	t->allOccupiedSquares = t->allPieces[blancas] | t->allPieces[negras];
-}
 void initBoard(Tablero * t){
 	memset(t,0,sizeof(Tablero));
 
@@ -154,6 +143,23 @@ void initBoard(Tablero * t){
 	t->piezas[negras][reina] = BB_SQUARE(d8);
 	t->piezas[negras][rey] = BB_SQUARE(e8);
 	updateBoardCache(t);
+}
+void updateBoardCache(Tablero * t){
+	t->allPieces[blancas] = t->piezas[blancas][peon]|
+		t->piezas[blancas][caballo]|
+		t->piezas[blancas][alfil]|
+		t->piezas[blancas][torre]|
+		t->piezas[blancas][reina]|
+		t->piezas[blancas][rey];
+
+
+	t->allPieces[negras] = t->piezas[negras][peon]|
+		t->piezas[negras][caballo]|
+		t->piezas[negras][alfil]|
+		t->piezas[negras][torre]|
+		t->piezas[negras][reina]|
+		t->piezas[negras][rey];
+	t->allOccupiedSquares = t->allPieces[blancas] | t->allPieces[negras];
 }
 bitboard computeKnightAttacks(casilla sq){
 	int rank = sq / 8;
@@ -248,7 +254,7 @@ void generateKnightMoves(moveLists * ml, color c,Tablero * t){
 					}
 				}
 			}
-			Move move = {from,to,caballo,capture,0};
+			Move move = {from,to,caballo,capture,0,0};
 			ml->moves[ml->count] = move;
 			ml->count++;
 		}
@@ -256,9 +262,6 @@ void generateKnightMoves(moveLists * ml, color c,Tablero * t){
 
 }
 void generateKingMoves(moveLists * ml, color c, Tablero * t){
-	/*
-	TODO: castling
-	*/
 	bitboard king = t->piezas[c][rey];
 	if(king == 0){
 		// this should NOT happen
@@ -280,9 +283,86 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 						break;
 					}
 				}
-				Move move = {from,i,rey,capture,0};
+				Move move = {from,i,rey,capture,0,0};
 				ml->moves[ml->count] = move;
 				ml->count++;
+			}
+			
+		}
+	}
+	//castling ROOKS IS HANDLED WHEN MAKING MOVE
+	// 0: no rooks or king move, 1: h: a rank rook already moved 2: h rank rook moved 3: king moved 4: all rooks moved 5: everything moved
+	if(c == blancas && from == e1){
+		bitboard rooks = t->piezas[c][torre];
+		while(rooks){
+			bool canCastleQueenSide = true;
+			bool canCastleKingSide = true;
+			casilla rook = __builtin_ctzll(rooks);
+			rooks &= (rooks - 1);
+			if(rook == h1 && (t->castlingRights[c] == 0 || t->castlingRights[c] == 1)){
+				for(casilla sq = f1; sq < h1 ;sq++){
+					if(BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c])){
+						canCastleKingSide = false;
+					}
+				}
+				if(canCastleKingSide){
+					casilla to = g1;
+					Move move = {from,to,rey,0,2,0};
+					ml->moves[ml->count] = move;
+					ml->count++;
+				}
+			}
+			else if(rook == a1 && (t->castlingRights[c] == 0 || t->castlingRights[c] == 1)){
+				for(casilla sq = d1; sq < a1;sq--){
+					if(BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c])){
+						canCastleQueenSide = false;
+					}
+				}
+				casilla to = c1;
+				Move move = {from,to,rey,0,2,0};
+				ml->moves[ml->count] = move;
+				ml->count++;
+			}
+			else{
+				printf("error on castling move generation, prolly an invalid square: %d\n",rook);
+			}
+		}
+	}
+	else if(c == negras && from == e8){
+		bitboard rooks = t->piezas[c][torre];
+		while(rooks){
+			casilla rook = __builtin_ctzll(rooks);
+			rooks &= (rooks - 1);
+
+
+			if(rook == a8 && (t->castlingRights[c] == 0 || t->castlingRights[c] == 1)){
+				for(casilla sq = d8; sq > a8;sq--){
+					if(BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c])){
+						canCastleQueenSide = false;
+					}
+				}
+				if(canCastleQueenSide){
+					casilla to = c8;
+					Move move = {from,to,rey,0,2,0};
+					ml->moves[ml->count] = move;
+					ml->count++;
+				}
+			}
+			else if(rook == h8 && (t->castlingRights[c] == 0 || t->castlingRights[c] == 1)){
+				for(casilla sq = f8; sq < h8; sq++){
+					if(BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c])){
+						canCastleKingSide = false;
+					}
+				}
+			}
+			if(canCastleKingSide){
+				casilla to = g8;
+				Move move = {from,to,rey,0,2,0};
+				ml->moves[ml->count] = move;
+				ml->count++;
+			}
+			else{
+				printf("error on castling move generation, prolly an invalid square: %d\n",rook);
 			}
 		}
 	}
@@ -308,13 +388,13 @@ void generatePawnMoves(moveLists * ml, color c, Tablero * t){
 			if(BB_SQUARE(to) & (~t->allOccupiedSquares)){
 				if((to / 8 == 1 && c == negras ) || (to / 8 == 6 && c == blancas)){
 					for(int i = caballo; i < rey; i++){
-						Move move = {from,to,i,0,0};
+						Move move = {from,to,peon,3,i};
 						ml->moves[ml->count] = move;
 						ml->count++;
 					}
 				}
 				else{
-					Move move = {from,to,peon,0,0};
+					Move move = {from,to,peon,0,0,0};
 					ml->moves[ml->count] = move;
 					ml->count++;
 				}
@@ -333,17 +413,19 @@ void generatePawnMoves(moveLists * ml, color c, Tablero * t){
 							break;
 						}
 					}
-					Move move = {from,to,peon,capture,0};
+					Move move = {from,to,peon,capture,0,0};
 					ml->moves[ml->count] = move;
 					ml->count++;
 				}
 			}
 		}
 		if((rank == 1) || (rank == 6)){
-			if(c == blancas && !(t->allOccupiedSquares & BB_SQUARE(from + 8)) && !(t->allOccupiedSquares & BB_SQUARE(from + 16))){
+			if(c == blancas && !(t->allOccupiedSquares & BB_SQUARE(from + 8)) &&
+				!(t->allOccupiedSquares & BB_SQUARE(from + 16))){
 				to = from + 16;
 			}
-			else if(c == negras && !(t->allOccupiedSquares & BB_SQUARE(from - 8)) && !(t->allOccupiedSquares & BB_SQUARE(from - 16))){
+			else if(c == negras && !(t->allOccupiedSquares & BB_SQUARE(from - 8)) &&
+				!(t->allOccupiedSquares & BB_SQUARE(from - 16))){
 				to = from - 16;
 			}
 			Move move = {from,to,peon,0,0};
@@ -369,7 +451,7 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t){
 					for(int piece = peon; piece <= rey; piece++){
 						if(t->piezas[!c][piece] & BB_SQUARE(to)){
 							capture = piece;
-							Move move = {from, to, capture, 0};
+							Move move = {from, to, capture, 0, 0};
 							ml->moves[ml->count] = move;
 							ml->count++;
 							break;
@@ -381,7 +463,7 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t){
 				}
 
 				else{
-					Move move = {from, to, capture, 0};
+					Move move = {from, to, capture, 0, 0};
 					ml->moves[ml->count] = move;
 					ml->count++;
 				}
@@ -405,7 +487,7 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t){
 						for(int piece =  peon; piece <= rey; piece++){
 							if(t->piezas[!c][piece] & BB_SQUARE(to)){
 								capture = piece;
-								Move move = {from,to,capture,0};
+								Move move = {from,to,capture,0,0};
 								ml->moves[ml->count] = move;
 								ml->count++;
 								break; // should exit while((to >= 0) && (to < 64))
@@ -416,7 +498,7 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t){
 						break;
 					}
 					else{
-						Move move = {from,to,capture,0};
+						Move move = {from,to,capture,0,0};
 						ml->moves[ml->count] = move;
 						ml->count++;
 					}
@@ -441,7 +523,7 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t){
 						for(int piece =  peon; piece <= rey; piece++){
 							if(t->piezas[!c][piece] & BB_SQUARE(to)){
 								capture = piece;
-								Move move = {from,to,capture,0};
+								Move move = {from,to,capture,0,0};
 								ml->moves[ml->count] = move;
 								ml->count++;
 								break; // should exit while((to >= 0) && (to < 64))
@@ -453,7 +535,7 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t){
 						break;
 					}
 					else{
-						Move move = {from,to,capture,0};
+						Move move = {from,to,capture,0,0};
 						ml->moves[ml->count] = move;
 						ml->count++;
 					}
@@ -471,7 +553,7 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t){
 						for(int piece = peon; piece <= rey; piece++){
 							if(t->piezas[!c][piece] & BB_SQUARE(to)){
 								capture = piece;
-								Move move = {from, to, capture, 0};
+								Move move = {from, to, capture, 0,0};
 								ml->moves[ml->count] = move;
 								ml->count++;
 								break;
@@ -482,7 +564,7 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t){
 						break;
 					}
 					else{
-						Move move = {from, to, capture, 2};
+						Move move = {from, to, capture, 0, 0};
 						ml->moves[ml->count] = move;
 						ml->count++;
 					}
