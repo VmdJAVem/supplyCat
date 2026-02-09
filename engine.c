@@ -72,6 +72,8 @@ Tablero tablero =  {
 void printBitboard(bitboard bb);
 void initBoard(Tablero * t);
 void updateBoardCache(Tablero * t);
+moveLists generateAllMoves(color c, Tablero * t);
+bool isAttacked(casilla sq, moveLists moves);
 bitboard computeKnightAttacks(casilla sq);
 bitboard computeKingAttacks(casilla sq);
 bitboard computePawnAttacks(color c,casilla sq);
@@ -83,33 +85,14 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t);
 void generateBishopMoves(moveLists * ml, color c, Tablero * t);
 
 int main(){
+	bool isPlaying = true;
+	color currentColor = blancas;
 	initBoard(&tablero);
-	printBitboard(tablero.allOccupiedSquares);
 	initAttackTables();
-	printf("Knight's Attack:\n");
-	for(int i = 0;i < 64;i++){
-		printBitboard(knightAttacks[i]);
-		sleep(1);
+	printBitboard(tablero.allOccupiedSquares);
+	while(isPlaying){
+		generateAllMoves(currentColor,&tablero);
 	}
-	sleep(5);
-	printf("Rey:\n");
-	for(int i = 0;i < 64;i++){
-		printBitboard(kingAttacks[i]);
-		sleep(1);
-	}
-	sleep(5);
-	printf("peon blanco:\n");
-	for(int j = 0;j < 64;j++){
-		printBitboard(pawnAttacks[blancas][j]);
-		sleep(1);
-	}
-	sleep(5);
-	printf("peon negro\n");
-	for(int j = 0;j < 64;j++){
-		printBitboard(pawnAttacks[negras][j]);
-		sleep(1);
-	}
-	return 0;
 }
 //debug
 void printBitboard(bitboard bb){
@@ -160,6 +143,32 @@ void updateBoardCache(Tablero * t){
 		t->piezas[negras][reina]|
 		t->piezas[negras][rey];
 	t->allOccupiedSquares = t->allPieces[blancas] | t->allPieces[negras];
+}
+moveLists generateAllMoves(color c, Tablero * t){
+	moveLists moves = {
+		{{0}},
+		0
+	};
+	generateKnightMoves(&moves, c, t);
+	generateKingMoves(&moves, c, t);
+	generatePawnMoves(&moves, c, t);
+	generateRookMoves(&moves, c, t);
+	generateBishopMoves(&moves, c, t);
+	return moves;
+}
+bool isAttacked(casilla sq, moveLists moves){
+	bitboard squareToBeChecked = BB_SQUARE(sq);
+	bitboard attackedSquares = 0;
+	for(int i = 0; i < 256; i++){
+		casilla attackedSquare = (moves.moves[i]).to;
+		attackedSquares |= attackedSquare;
+	}
+	if(squareToBeChecked & attackedSquares){
+		return true;
+	}
+	else{
+		return false;
+	}
 }
 bitboard computeKnightAttacks(casilla sq){
 	int rank = sq / 8;
@@ -271,6 +280,7 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 		return;
 	}
 	casilla from = __builtin_ctzll(king);
+	moveLists opponentMoves = (generateAllMoves(!c,t));
 	/*
 	TODO: atack checking
 	 */
@@ -280,7 +290,7 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 			int capture = 0;
 			if(BB_SQUARE(i) & t->allPieces[!c]){
 				for(int piece = peon; piece <= rey; piece++){
-					if(t->piezas[!c][piece] & BB_SQUARE(i)){
+					if(t->piezas[!c][piece] & BB_SQUARE(i) && !(isAttacked(from,opponentMoves))){
 						capture = piece;
 						break;
 					}
@@ -289,7 +299,7 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 				ml->moves[ml->count] = move;
 				ml->count++;
 			}
-			else{
+			else if(!(isAttacked(from,opponentMoves))){
 				Move move = {from,i,rey,capture,0,0};
 				ml->moves[ml->count] = move;
 				ml->count++;
@@ -308,11 +318,11 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 			rooks &= (rooks - 1);
 			if(rook == h1 && (t->castlingRights[c] == 0 || t->castlingRights[c] == 1)){
 				for(casilla sq = f1; sq < h1; sq++){
-					if(BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c])){
+					if((BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c]))){
 						canCastleKingSide = false;
 					}
 				}
-				if(canCastleKingSide){
+				if(canCastleKingSide && !(isAttacked(g1,opponentMoves))){
 					casilla to = g1;
 					Move move = {from,to,rey,0,2,0};
 					ml->moves[ml->count] = move;
@@ -325,7 +335,7 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 						canCastleQueenSide = false;
 					}
 				}
-				if(canCastleQueenSide){
+				if(canCastleQueenSide && !(isAttacked(c1,opponentMoves))){
 					casilla to = c1;
 					Move move = {from,to,rey,0,2,0};
 					ml->moves[ml->count] = move;
