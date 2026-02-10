@@ -281,9 +281,7 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 	}
 	casilla from = __builtin_ctzll(king);
 	moveLists opponentMoves = (generateAllMoves(!c,t));
-	/*
-	TODO: atack checking
-	 */
+	
 	bitboard attacks = kingAttacks[from] & (~t->allPieces[c]);
 	for(int i = 0; i < 64; i++){
 		if(attacks & (C64(1) << i)){
