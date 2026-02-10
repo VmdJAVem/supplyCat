@@ -83,6 +83,7 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t);
 void generatePawnMoves(moveLists * ml, color c, Tablero * t);
 void generateRookMoves(moveLists * ml, color c, Tablero * t);
 void generateBishopMoves(moveLists * ml, color c, Tablero * t);
+void generateQueenMoves(moveLists * ml, color c, Tablero * t);
 
 int main(){
 	bool isPlaying = true;
@@ -154,20 +155,17 @@ moveLists generateAllMoves(color c, Tablero * t){
 	generatePawnMoves(&moves, c, t);
 	generateRookMoves(&moves, c, t);
 	generateBishopMoves(&moves, c, t);
+	generateQueenMoves(&moves, c, t);
 	return moves;
 }
 bool isAttacked(casilla sq, moveLists moves){
-	bitboard squareToBeChecked = BB_SQUARE(sq);
-	bitboard attackedSquares = 0;
-	for(int i = 0; i < 256; i++){
-		casilla attackedSquare = (moves.moves[i]).to;
-		attackedSquares |= attackedSquare;
-	}
-	if(squareToBeChecked & attackedSquares){
-		return true;
-	}
-	else{
-		return false;
+	for(int i = 0; i < moves.count; i++){
+		if(moves.moves[i].to == sq){
+			return true;
+		}
+		else{
+			return false;
+		}
 	}
 }
 bitboard computeKnightAttacks(casilla sq){
