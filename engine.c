@@ -84,6 +84,7 @@ void generatePawnMoves(moveLists * ml, color c, Tablero * t);
 void generateRookMoves(moveLists * ml, color c, Tablero * t);
 void generateBishopMoves(moveLists * ml, color c, Tablero * t);
 void generateQueenMoves(moveLists * ml, color c, Tablero * t);
+float boardEval(Tablero t);
 
 int main(){
 	bool isPlaying = true;
@@ -92,7 +93,8 @@ int main(){
 	initAttackTables();
 	printBitboard(tablero.allOccupiedSquares);
 	while(isPlaying){
-		generateAllMoves(currentColor,&tablero);
+		moveLists myMoves = generateAllMoves(currentColor,&tablero);
+		moveLists theirMoves = generateAllMoves(!currentColor, &tablero);
 	}
 }
 //debug
@@ -588,4 +590,16 @@ void generateQueenMoves(moveLists * ml, color c, Tablero * t){
 			}
 		}
 	}
+}
+float boardEval(Tablero t){
+	// queen = 9; rook = 5; bishop = 3; knight = 3; pawn = 1;
+	float value =
+	200 * (t.[blancas][rey] - t.[negras][rey]) +
+	1 * (t.[blancas][peon] - t.[negras][peon]) +
+	3 * (t.[blancas][caballo] - t.[negras][caballo] + (t.[blancas][alfi] - t.[negras][alfil])) +
+	5 * (t.[blancas][torre] - t.[negras][torre]) +
+	9 * (t.[blancas][reina] - t.[negras][reina]) +
+	0.1 * ((generateAllMoves(blancas,&t)).count - (generateAllMoves(negras,&t)).count);
+	float scaledValue = tanh(value / 25.0f); 
+	return scaledValue;
 }
