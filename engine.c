@@ -5,6 +5,9 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <math.h>
+/*
+ FIX:move genereation
+ */
 //importante
 typedef uint64_t bitboard;
 //macros
@@ -73,8 +76,8 @@ Tablero tablero =  {
 void printBitboard(bitboard bb);
 void initBoard(Tablero * t);
 void updateBoardCache(Tablero * t);
-moveLists generateAllMoves(color c, Tablero * t);
-bool isAttacked(casilla sq, moveLists moves);
+void generateAllMoves(color c, Tablero * t, moveLists * output);
+bool isAttacked(Tablero *t, int square, color attackerColor);
 bitboard computeKnightAttacks(casilla sq);
 bitboard computeKingAttacks(casilla sq);
 bitboard computePawnAttacks(color c,casilla sq);
@@ -85,7 +88,7 @@ void generatePawnMoves(moveLists * ml, color c, Tablero * t);
 void generateRookMoves(moveLists * ml, color c, Tablero * t);
 void generateBishopMoves(moveLists * ml, color c, Tablero * t);
 void generateQueenMoves(moveLists * ml, color c, Tablero * t);
-float boardEval(Tablero t);
+float boardEval(Tablero * t);
 
 int main(){
 	bool isPlaying = true;
@@ -93,10 +96,9 @@ int main(){
 	initBoard(&tablero);
 	initAttackTables();
 	printBitboard(tablero.allOccupiedSquares);
-	while(isPlaying){
-		moveLists myMoves = generateAllMoves(currentColor,&tablero);
-		moveLists theirMoves = generateAllMoves(!currentColor, &tablero);
-	}
+	moveLists myMoves, theirMoves;
+	generateAllMoves(currentColor, &tablero, &myMoves);
+	generateAllMoves(!currentColor, &tablero, &theirMoves);
 }
 //debug
 void printBitboard(bitboard bb){
@@ -148,29 +150,48 @@ void updateBoardCache(Tablero * t){
 		t->piezas[negras][rey];
 	t->allOccupiedSquares = t->allPieces[blancas] | t->allPieces[negras];
 }
-moveLists generateAllMoves(color c, Tablero * t){
-	moveLists moves = {
-		{{0}},
-		0
-	};
-	generateKnightMoves(&moves, c, t);
-	generateKingMoves(&moves, c, t);
-	generatePawnMoves(&moves, c, t);
-	generateRookMoves(&moves, c, t);
-	generateBishopMoves(&moves, c, t);
-	generateQueenMoves(&moves, c, t);
-	return moves;
+void generateAllMoves(color c, Tablero * t, moveLists * output){
+	output->count = 0;
+	printf("knight %d\n",c);
+	generateKnightMoves(output, c, t);
+	printf("knight done %d\n",output->count);
+	printf("king %d\n",c);
+	generateKingMoves(output, c, t);
+	printf("king done %d\n",output->count);
+	printf("pawn %d\n",c);
+	generatePawnMoves(output, c, t);
+	printf("pawn done %d\n",output->count);
+	printf("rook %d\n",c);
+	generateRookMoves(output, c, t);
+	printf("rook done %d\n",output->count);
+	printf("bishop %d\n",c);
+	generateBishopMoves(output, c, t);
+	printf("bishop done %d\n",output->count);
+	printf("Queen %d\n",c);
+	generateQueenMoves(output, c, t);
+	printf("pawn queen %d\n",output->count);
 }
-bool isAttacked(casilla sq, moveLists moves){
-	for(int i = 0; i < moves.count; i++){
-		if(moves.moves[i].to == sq){
+bool isAttacked(Tablero * t, int square, color attackerColor){
+	bitboard king = t->piezas[attackerColor][rey];
+	if(king){
+		int from = __builtin_ctzll(king);
+		bitboard sqAttackedByKing = kingAttacks[from];
+		if(sqAttackedByKing & (1ULL << square)) return true;
+	}
+	moveLists opponentMoves = {0};
+	generateRookMoves(&opponentMoves,attackerColor,t);
+	generateKnightMoves(&opponentMoves,attackerColor,t);
+	generateBishopMoves(&opponentMoves,attackerColor,t);
+	generateQueenMoves(&opponentMoves,attackerColor,t);
+	generatePawnMoves(&opponentMoves,attackerColor,t);
+	for(int i = 0; i < opponentMoves.count; i++){
+		if(opponentMoves.moves[i].to == square){
 			return true;
 		}
-		else{
-			return false;
-		}
 	}
+	return false;
 }
+
 bitboard computeKnightAttacks(casilla sq){
 	int rank = sq / 8;
 	int file = sq % 8;
@@ -281,15 +302,13 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 		return;
 	}
 	casilla from = __builtin_ctzll(king);
-	moveLists opponentMoves = (generateAllMoves(!c,t));
-	
 	bitboard attacks = kingAttacks[from] & (~t->allPieces[c]);
 	for(int i = 0; i < 64; i++){
 		if(attacks & (C64(1) << i)){
 			int capture = 0;
 			if(BB_SQUARE(i) & t->allPieces[!c]){
 				for(int piece = peon; piece <= rey; piece++){
-					if(t->piezas[!c][piece] & BB_SQUARE(i) && !(isAttacked(from,opponentMoves))){
+					if(t->piezas[!c][piece] & BB_SQUARE(i) && !(isAttacked(t,i,!c))){
 						capture = piece;
 						break;
 					}
@@ -298,7 +317,7 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 				ml->moves[ml->count] = move;
 				ml->count++;
 			}
-			else if(!(isAttacked(from,opponentMoves))){
+			else if(!(isAttacked(t,i,!c))){
 				Move move = {from,i,rey,capture,0,0};
 				ml->moves[ml->count] = move;
 				ml->count++;
@@ -321,7 +340,7 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 						canCastleKingSide = false;
 					}
 				}
-				if(canCastleKingSide && !(isAttacked(g1,opponentMoves))){
+				if(canCastleKingSide && !(isAttacked(t,g1,!c))){
 					casilla to = g1;
 					Move move = {from,to,rey,0,2,0};
 					ml->moves[ml->count] = move;
@@ -334,7 +353,7 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 						canCastleQueenSide = false;
 					}
 				}
-				if(canCastleQueenSide && !(isAttacked(c1,opponentMoves))){
+				if(canCastleQueenSide && !(isAttacked(t,c1,!c))){
 					casilla to = c1;
 					Move move = {from,to,rey,0,2,0};
 					ml->moves[ml->count] = move;
@@ -367,7 +386,7 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 					ml->count++;
 				}
 			}
-			if(rook == a8 && (t->castlingRights[c] == 0 || t->castlingRights[c] == 2)){
+			else if(rook == a8 && (t->castlingRights[c] == 0 || t->castlingRights[c] == 2)){
 				for(casilla sq = d8; sq > a8; sq--){
 					if(BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c])){
 						canCastleQueenSide = false;
@@ -592,15 +611,19 @@ void generateQueenMoves(moveLists * ml, color c, Tablero * t){
 		}
 	}
 }
-float boardEval(Tablero t){
+float boardEval(Tablero * t){
 	// queen = 9; rook = 5; bishop = 3; knight = 3; pawn = 1;
+	moveLists white;
+	generateAllMoves(blancas,t,&white);
+	moveLists black;
+	generateAllMoves(negras,t,&black);
 	float value =
-	200 * (t.[blancas][rey] - t.[negras][rey]) +
-	1 * (t.[blancas][peon] - t.[negras][peon]) +
-	3 * (t.[blancas][caballo] - t.[negras][caballo] + (t.[blancas][alfi] - t.[negras][alfil])) +
-	5 * (t.[blancas][torre] - t.[negras][torre]) +
-	9 * (t.[blancas][reina] - t.[negras][reina]) +
-	0.1 * ((generateAllMoves(blancas,&t)).count - (generateAllMoves(negras,&t)).count);
+	200 * (t->piezas[blancas][rey] - t->piezas[negras][rey]) +
+	1 * (t->piezas[blancas][peon] - t->piezas[negras][peon]) +
+	3 * (t->piezas[blancas][caballo] - t->piezas[negras][caballo] + (t->piezas[blancas][alfil] - t->piezas[negras][alfil])) +
+	5 * (t->piezas[blancas][torre] - t->piezas[negras][torre]) +
+	9 * (t->piezas[blancas][reina] - t->piezas[negras][reina]) +
+	0.1 * (white.count - black.count);
 	float scaledValue = tanh(value / 25.0f); 
 	return scaledValue;
 }
