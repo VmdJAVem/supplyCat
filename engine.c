@@ -65,6 +65,7 @@ bitboard pawnAttacks[2][64];
 //sliding pieces offsets
 int rookOffsets[4] = {8,-8,-1,1}; // up, down, left, right
 int bishopOffsets[4] = {-9,-7,7,9}; //up-left, up-right,down-left,down-right
+int QueenOffsets[8] = {8,-8,-1,1,-9,-7,7,9};
 // misc
 Tablero tablero =  {
 	.piezas = {{0}},
@@ -152,24 +153,32 @@ void updateBoardCache(Tablero * t){
 }
 void generateAllMoves(color c, Tablero * t, moveLists * output){
 	output->count = 0;
-	printf("knight %d\n",c);
+	printf("=== Checking %s Knight moves ===\n", c == blancas ? "white" : "black");
 	generateKnightMoves(output, c, t);
-	printf("knight done %d\n",output->count);
-	printf("king %d\n",c);
+	printf("=== Knight moves done, %d moves added\n",output->count);
+	int count = output->count;
+	printf("=== Checking %s King moves ===\n", c == blancas ? "white" : "black");
 	generateKingMoves(output, c, t);
-	printf("king done %d\n",output->count);
-	printf("pawn %d\n",c);
+	printf("=== King moves done, %d moves added\n",output->count - count);
+	count = output->count;
+	printf("=== Checking %s Pawn moves ===\n", c == blancas ? "white" : "black");
 	generatePawnMoves(output, c, t);
-	printf("pawn done %d\n",output->count);
-	printf("rook %d\n",c);
+	printf("=== Pawn moves done, %d moves added\n",output->count - count);
+	count = output->count;
+	printf("=== Checking %s Rook moves ===\n", c == blancas ? "white" : "black");
 	generateRookMoves(output, c, t);
-	printf("rook done %d\n",output->count);
-	printf("bishop %d\n",c);
+	printf("=== Rook moves done, %d moves added\n",output->count - count);
+	count = output->count;
+	printf("=== Checking  %s Bishop moves ===\n", c == blancas ? "white" : "black");
 	generateBishopMoves(output, c, t);
-	printf("bishop done %d\n",output->count);
-	printf("Queen %d\n",c);
+	printf("=== Bishop moves done, %d moves added\n",output->count - count);
+	count = output->count;
+	printf("=== Checking %s Queen moves ===\n", c == blancas ? "white" : "black");
 	generateQueenMoves(output, c, t);
-	printf("pawn queen %d\n",output->count);
+	printf("=== Queen moves done, %d moves added\n",output->count - count);
+	for(int i = 0; i < 4; i++){
+		printf("\n");
+	}
 }
 bool isAttacked(Tablero * t, int square, color attackerColor){
 	bitboard king = t->piezas[attackerColor][rey];
@@ -272,7 +281,7 @@ void generateKnightMoves(moveLists * ml, color c,Tablero * t){
 	while(allKnights){
 		casilla from = __builtin_ctzll(allKnights);
 		allKnights &= (allKnights - 1);
-		bitboard attacks = knightAttacks[from];
+		bitboard attacks = (knightAttacks[from] & (~t->allPieces[c]));
 		while(attacks){
 			casilla to = __builtin_ctzll(attacks);
 			attacks &= (attacks - 1);
@@ -479,32 +488,32 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t){
 		allRooks &= (allRooks - 1);
 		for(int i = 0; i < 4; i++){
 			int offset = rookOffsets[i];
-			casilla to = from + offset;
-			while((to >= 0) && (to < 64)){
-				if((offset == 1 || offset == -1) && (to / 8) != (from / 8)){
-					break;
-				}
+			int j = 1;
+			casilla to = from + (j * offset);
+			while((to >= 0) && (to < 64) && (to / 8 == from / 8 || to % 8 == from % 8)){ // check if we are moving by the same factor vertically and horizontallly, if true not enter loop
 				int capture = 0;
 				if(BB_SQUARE(to) & t->allPieces[!c]){
-					for(int piece = peon; piece <= rey; piece++){
+					for(int piece =  peon; piece <= rey; piece++){
 						if(t->piezas[!c][piece] & BB_SQUARE(to)){
 							capture = piece;
-							Move move = {from, to, capture, 0, 0};
+							Move move = {from,to,torre,capture,0,0};
 							ml->moves[ml->count] = move;
 							ml->count++;
 							break;
 						}
 					}
-				}
-				else if(t->allPieces[c] & BB_SQUARE(to)){
 					break;
 				}
-
+				else if(BB_SQUARE(to) & t->allPieces[c]){
+					break;
+				}
 				else{
-					Move move = {from, to, capture, 0, 0};
+					Move move = {from,to, torre, capture,0,0};
 					ml->moves[ml->count] = move;
 					ml->count++;
 				}
+				j++;
+				to = from + (j * offset);
 			}
 		}
 	}
@@ -516,96 +525,97 @@ void generateBishopMoves(moveLists * ml, color c, Tablero * t){
 		allBishops &= (allBishops - 1);
 		for(int i = 0; i < 4; i++){
 			int offset = bishopOffsets[i];
-			casilla to = from + offset;
-			while((to >= 0) && (to < 64)){
-				if(abs((from % 8) - (to % 8)) != abs((from / 8) - (to / 8))){
-					break;
-				}
-				int capture  =  0;
-				if(BB_SQUARE(to) & t->allPieces[!c]){
-					for(int piece =  peon; piece <= rey; piece++){
-						if(t->piezas[!c][piece] & BB_SQUARE(to)){
-							capture = piece;
-							Move move = {from,to,capture,0,0};
-							ml->moves[ml->count] = move;
-							ml->count++;
-							break; // should exit while((to >= 0) && (to < 64))
-						}
-					}
-				}
-				else if(BB_SQUARE(to) & t->allPieces[c]){
-					break;
-				}
-				else{
-					Move move = {from,to,capture,0,0};
-					ml->moves[ml->count] = move;
-					ml->count++;
-				}
-			}
-		}
-	}
-}
-void generateQueenMoves(moveLists * ml, color c, Tablero * t){
-	bitboard allQueens  =  t->piezas[c][alfil];
-	while(allQueens){
-		casilla  from = __builtin_ctzll(allQueens);
-		allQueens &= (allQueens - 1);
-		for(int i = 0; i < 4; i++){
-			int offset = bishopOffsets[i];
-			casilla to = from + offset;
-			while((to >= 0) && (to < 64)){
-				if(abs((from % 8) - (to % 8)) != abs((from / 8) - (to / 8))){
-					break;
-				}
+			int j = 1;
+			casilla to = from + (j * offset);
+			while(to >= 0 && to < 64 && abs((from % 8) - (to % 8)) == abs((from / 8) - (to / 8))){
 				int capture = 0;
 				if(BB_SQUARE(to) & t->allPieces[!c]){
 					for(int piece =  peon; piece <= rey; piece++){
 						if(t->piezas[!c][piece] & BB_SQUARE(to)){
 							capture = piece;
-							Move move = {from,to,capture,0,0};
-							ml->moves[ml->count] = move;
-							ml->count++;
-							break; // should exit while((to >= 0) && (to < 64))
-						}
-					}
-
-				}
-				else if(BB_SQUARE(to) & t->allPieces[c]){
-					break;
-				}
-				else{
-					Move move = {from,to,capture,0,0};
-					ml->moves[ml->count] = move;
-					ml->count++;
-				}
-			}
-		}
-		for(int i = 0; i < 4; i++){
-			int offset = rookOffsets[i];
-			casilla to = from + offset;
-			while((to >= 0) && (to < 64)){
-				if((offset == 1 || offset == -1) && (to / 8) != (from / 8)){
-					break;
-				}
-				int capture = 0;
-				if(BB_SQUARE(to) & t->allPieces[!c]){
-					for(int piece = peon; piece <= rey; piece++){
-						if(t->piezas[!c][piece] & BB_SQUARE(to)){
-							capture = piece;
-							Move move = {from, to, capture, 0,0};
+							Move move = {from,to,alfil,capture,0,0};
 							ml->moves[ml->count] = move;
 							ml->count++;
 							break;
 						}
 					}
+					break;
 				}
-				else if(t->allPieces[c] & BB_SQUARE(to)){
+				else if(BB_SQUARE(to) & t->allPieces[c]){
 					break;
 				}
 				else{
-					Move move = {from, to, capture, 0, 0};
+					Move move = {from,to, alfil, capture,0,0};
 					ml->moves[ml->count] = move;
 					ml->count++;
+				}
+				j++;
+				to = from + (j * offset);
+			}
+		}
+	}
+}
+void generateQueenMoves(moveLists * ml, color c, Tablero * t){
+	bitboard allQueens = t->piezas[c][reina];
+	while(allQueens){
+		casilla from = __builtin_ctzll(allQueens);
+		allQueens &= (allQueens - 1);
+		for(int i = 0; i < 8; i++){
+			int offset = QueenOffsets[i];
+			int j = 1;
+			casilla to = from + (j * offset);
+			if(i < 4){
+				while((to >= 0) && (to < 64) && (to / 8 == from / 8 || to % 8 == from % 8)){
+					int capture = 0;
+					if(BB_SQUARE(to) & t->allPieces[!c]){
+						for(int piece =  peon; piece <= rey; piece++){
+							if(t->piezas[!c][piece] & BB_SQUARE(to)){
+								capture = piece;
+								Move move = {from,to,reina,capture,0,0};
+								ml->moves[ml->count] = move;
+								ml->count++;
+								break;
+							}
+						}
+						break;
+					}
+					else if(BB_SQUARE(to) & t->allPieces[c]){
+						break;
+					}
+					else{
+						Move move = {from,to, reina, capture,0,0};
+						ml->moves[ml->count] = move;
+						ml->count++;
+					}
+					j++;
+					to = from + (j * offset);
+				}
+      			}
+			else if(i >= 4){
+				while(to >= 0 && to < 64 && abs((from % 8) - (to % 8)) == abs((from / 8) - (to / 8))){
+					int capture = 0;
+					if(BB_SQUARE(to) & t->allPieces[!c]){
+						for(int piece =  peon; piece <= rey; piece++){
+							if(t->piezas[!c][piece] & BB_SQUARE(to)){
+								capture = piece;
+								Move move = {from,to,reina,capture,0,0};
+								ml->moves[ml->count] = move;
+								ml->count++;
+								break;
+							}
+						}
+						break;
+					}
+					else if(BB_SQUARE(to) & t->allPieces[c]){
+						break;
+					}
+					else{
+						Move move = {from,to, reina, capture,0,0};
+						ml->moves[ml->count] = move;
+						ml->count++;
+					}
+					j++;
+					to = from + (j * offset);
 				}
 			}
 		}
