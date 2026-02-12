@@ -5,9 +5,6 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <math.h>
-/*
- FIX:move genereation
- */
 //importante
 typedef uint64_t bitboard;
 //macros
@@ -89,7 +86,8 @@ void generatePawnMoves(moveLists * ml, color c, Tablero * t);
 void generateRookMoves(moveLists * ml, color c, Tablero * t);
 void generateBishopMoves(moveLists * ml, color c, Tablero * t);
 void generateQueenMoves(moveLists * ml, color c, Tablero * t);
-float boardEval(Tablero * t);
+float boardEval(Tablero * t, moveLists * white, moveLists * black);
+int isChecked(Tablero * t, moveLists * opponetMoves, casilla king);
 
 int main(){
 	bool isPlaying = true;
@@ -97,9 +95,15 @@ int main(){
 	initBoard(&tablero);
 	initAttackTables();
 	printBitboard(tablero.allOccupiedSquares);
-	moveLists myMoves, theirMoves;
-	generateAllMoves(currentColor, &tablero, &myMoves);
-	generateAllMoves(!currentColor, &tablero, &theirMoves);
+	moveLists white, black;
+	if(currentColor == blancas){
+		generateAllMoves(currentColor, &tablero, &white);
+		generateAllMoves(!currentColor, &tablero, &black);
+	}
+	else{
+		generateAllMoves(!currentColor, &tablero, &white);
+		generateAllMoves(currentColor, &tablero, &black);
+	}
 }
 //debug
 void printBitboard(bitboard bb){
@@ -153,13 +157,14 @@ void updateBoardCache(Tablero * t){
 }
 void generateAllMoves(color c, Tablero * t, moveLists * output){
 	output->count = 0;
-	printf("=== Checking %s Knight moves ===\n", c == blancas ? "white" : "black");
-	generateKnightMoves(output, c, t);
-	printf("=== Knight moves done, %d moves added\n",output->count);
 	int count = output->count;
 	printf("=== Checking %s King moves ===\n", c == blancas ? "white" : "black");
 	generateKingMoves(output, c, t);
 	printf("=== King moves done, %d moves added\n",output->count - count);
+	count = output->count;
+	printf("=== Checking %s Knight moves ===\n", c == blancas ? "white" : "black");
+	generateKnightMoves(output, c, t);
+	printf("=== Knight moves done, %d moves added\n",output->count);
 	count = output->count;
 	printf("=== Checking %s Pawn moves ===\n", c == blancas ? "white" : "black");
 	generatePawnMoves(output, c, t);
@@ -621,19 +626,29 @@ void generateQueenMoves(moveLists * ml, color c, Tablero * t){
 		}
 	}
 }
-float boardEval(Tablero * t){
+// invert if called for black (-boardEval(tablero))
+float boardEval(Tablero * t, moveLists * white, moveLists * black){
 	// queen = 9; rook = 5; bishop = 3; knight = 3; pawn = 1;
-	moveLists white;
-	generateAllMoves(blancas,t,&white);
-	moveLists black;
-	generateAllMoves(negras,t,&black);
+	casilla king = __builtin_ctzll(t->piezas[blancas][rey]);
+	if(isChecked(t,black,king) != 0){
+		//check if checkmate, if it is return 1.0f
+		
+	}
 	float value =
-	200 * (t->piezas[blancas][rey] - t->piezas[negras][rey]) +
-	1 * (t->piezas[blancas][peon] - t->piezas[negras][peon]) +
-	3 * (t->piezas[blancas][caballo] - t->piezas[negras][caballo] + (t->piezas[blancas][alfil] - t->piezas[negras][alfil])) +
-	5 * (t->piezas[blancas][torre] - t->piezas[negras][torre]) +
-	9 * (t->piezas[blancas][reina] - t->piezas[negras][reina]) +
-	0.1 * (white.count - black.count);
+	1 * (__builtin_popcountll(t->piezas[blancas][peon]) - __builtin_popcountll(t->piezas[negras][peon])) +
+	3 * ((__builtin_popcountll(t->piezas[blancas][caballo]) - __builtin_popcountll(t->piezas[negras][caballo])) + (__builtin_popcountll(t->piezas[blancas][alfil]) - __builtin_popcountll(t->piezas[negras][alfil]))) +
+	5 * (__builtin_popcountll(t->piezas[blancas][torre]) - __builtin_popcountll(t->piezas[negras][torre])) +
+	9 * (__builtin_popcountll(t->piezas[blancas][reina]) - __builtin_popcountll(t->piezas[negras][reina])) +
+	0.1 * (white->count - black->count);
 	float scaledValue = tanh(value / 25.0f); 
 	return scaledValue;
+}
+int isChecked(Tablero * t, moveLists * opponetMoves, casilla king){
+	int checkedBy = 0;
+	for(int i = 0; i < opponetMoves->count; i++){
+		if(opponetMoves->moves[i].to == king){
+			checkedBy++;
+		}
+	}
+	return checkedBy;
 }
