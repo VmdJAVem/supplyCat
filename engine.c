@@ -43,6 +43,7 @@ typedef struct{
 	bitboard allPieces[2];
 	bitboard allOccupiedSquares;
 	uint8_t castlingRights;
+	casilla EnPassantSquare;
 }Tablero;
 const uint8_t WHITE_OO = 1;
 const uint8_t WHITE_OOO = 2;
@@ -77,7 +78,8 @@ Tablero tablero =  {
 	.allOccupiedSquares = 0,
 	.castlingRights = 0,
 };
-moveLists movesWhenChecked = {0};
+moveLists movesWhenChecked[2] = {0};
+bool isChecked[2] = {false};
 //funciones
 void printBitboard(bitboard bb);
 void initBoard(Tablero * t);
@@ -94,8 +96,7 @@ void generatePawnMoves(moveLists * ml, color c, Tablero * t);
 void generateRookMoves(moveLists * ml, color c, Tablero * t);
 void generateBishopMoves(moveLists * ml, color c, Tablero * t);
 void generateQueenMoves(moveLists * ml, color c, Tablero * t);
-float boardEval(Tablero * t, moveLists * white, moveLists * black);
-int isChecked(Tablero * t, moveLists * opponetMoves, casilla king);
+float boardEval(Tablero * t, color c);
 void makeMove(Move * move, Tablero * t, color c);
 
 int main(){
@@ -479,14 +480,48 @@ void generatePawnMoves(moveLists * ml, color c, Tablero * t){
 			if(c == blancas && !(t->allOccupiedSquares & BB_SQUARE(from + 8)) &&
 				!(t->allOccupiedSquares & BB_SQUARE(from + 16))){
 				to = from + 16;
+				Move move = {from,to,peon,0,0,0};
+				ml->moves[ml->count] = move;
+				ml->count++;
 			}
 			else if(c == negras && !(t->allOccupiedSquares & BB_SQUARE(from - 8)) &&
 				!(t->allOccupiedSquares & BB_SQUARE(from - 16))){
 				to = from - 16;
+				Move move = {from,to,peon,0,0,0};
+				ml->moves[ml->count] = move;
+				ml->count++;
 			}
-			Move move = {from,to,peon,0,0};
-			ml->moves[ml->count] = move;
-			ml->count++;
+
+		}
+		if(rank == 4 && t->EnPassantSquare != 0 && c == blancas){
+			if(t->EnPassantSquare == (from + 7)){ // left
+				to = from + 7;
+				Move move = {from,to,peon,0,1,0};
+				ml->moves[ml->count] = move;
+				ml->count++;
+			}
+			if(t->EnPassantSquare == (from  + 9)){ // right
+				to = from + 9;
+				Move move = {from,to,peon,0,1,0};
+				ml->moves[ml->count] = move;
+				ml->count++;
+
+			}
+		}
+		else if(rank == 3 && t->EnPassantSquare != 0 && c == negras){
+			if(t->EnPassantSquare == (from - 7)){ // left
+				to = from - 7;
+				Move move = {from,to,peon,0,1,0};
+				ml->moves[ml->count] = move;
+				ml->count++;
+			}
+			if(t->EnPassantSquare == (from - 9)){ // right
+				to = from - 9;
+				Move move = {from,to,peon,0,1,0};
+				ml->moves[ml->count] = move;
+				ml->count++;
+
+			}
 		}
 	}
 }
@@ -630,37 +665,53 @@ void generateQueenMoves(moveLists * ml, color c, Tablero * t){
 		}
 	}
 }
-// invert if called for black (-boardEval(tablero))
-float boardEval(Tablero * t, moveLists * white, moveLists * black){
+float boardEval(Tablero * t, color c){
 	// queen = 9; rook = 5; bishop = 3; knight = 3; pawn = 1;
-	movesWhenChecked = (moveLists){0};
-	casilla king = __builtin_ctzll(t->piezas[blancas][rey]);
-	if(isAttacked(t,king,negras)){
-		//check if checkmate, if it is return 1.0f
-		for(int i = 0; i < white->count; i++){
-			Tablero temp = *t;
-			makeMove(&white->moves[i], &temp, blancas);
-			king = __builtin_ctzll(temp.piezas[blancas][rey]);
-			if(!isAttacked(&temp,king,negras)){
-				movesWhenChecked.moves[movesWhenChecked.count] = white->moves[i];
-				movesWhenChecked.count++;
+	movesWhenChecked[c] = (moveLists){0};
+	moveLists movePerColor[2] = {0};
+	casilla king = __builtin_ctzll(t->piezas[c][rey]);
+	if(isAttacked(t,king,!c)){
+		moveLists pseudoLegalMoves = {0};
+		isChecked[c] = true;
+		Tablero temp = *t;
+		generateAllMoves(c,&temp,&pseudoLegalMoves);
+
+		for(int i = 0; i < pseudoLegalMoves.count; i++){
+			makeMove(&pseudoLegalMoves.moves[i], &temp, c);
+			king = __builtin_ctzll(temp.piezas[c][rey]);
+			if(!isAttacked(&temp, king, !c)){
+				movesWhenChecked[c].moves[movesWhenChecked[c].count] = pseudoLegalMoves.moves[i];
+				movesWhenChecked[c].count++;
 			}
+			temp = *t;
 		}
-		if(movesWhenChecked.count == 0){
-			return 1.0f;
+		if(movesWhenChecked[c].count == 0){
+			return -1.0f;
+		}
+		else{
+		movePerColor[c] = movesWhenChecked[c];
+		generateAllMoves(!c,t,&movePerColor[!c]);
 		}
 	}
+	else{
+		generateAllMoves(blancas,t,&movePerColor[blancas]);
+		generateAllMoves(negras,t,&movePerColor[negras]);
+
+	}
+
 	float value =
-	1 * (__builtin_popcountll(t->piezas[blancas][peon]) - __builtin_popcountll(t->piezas[negras][peon])) +
-	3 * ((__builtin_popcountll(t->piezas[blancas][caballo]) - __builtin_popcountll(t->piezas[negras][caballo])) + (__builtin_popcountll(t->piezas[blancas][alfil]) - __builtin_popcountll(t->piezas[negras][alfil]))) +
-	5 * (__builtin_popcountll(t->piezas[blancas][torre]) - __builtin_popcountll(t->piezas[negras][torre])) +
-	9 * (__builtin_popcountll(t->piezas[blancas][reina]) - __builtin_popcountll(t->piezas[negras][reina])) +
-	0.1 * (white->count - black->count);
+		1 * (__builtin_popcountll(t->piezas[c][peon]) - __builtin_popcountll(t->piezas[!c][peon])) +
+	3 * ((__builtin_popcountll(t->piezas[c][caballo]) - __builtin_popcountll(t->piezas[!c][caballo])) + (__builtin_popcountll(t->piezas[c][alfil]) - __builtin_popcountll(t->piezas[!c][alfil]))) +
+	5 * (__builtin_popcountll(t->piezas[c][torre]) - __builtin_popcountll(t->piezas[!c][torre])) +
+	9 * (__builtin_popcountll(t->piezas[c][reina]) - __builtin_popcountll(t->piezas[!c][reina])) +
+	0.1 * (movePerColor[c].count - movePerColor[!c].count);
 	float scaledValue = tanh(value / 25.0f);
 	return scaledValue;
 }
 
 void makeMove(Move * move, Tablero * t, color c){
+	casilla enPassantSq = t-> EnPassantSquare;
+	t->EnPassantSquare = 0;
 	switch(move->special){
 		case 0:
 			if(move->capture != 0){
@@ -696,11 +747,20 @@ void makeMove(Move * move, Tablero * t, color c){
 					default: break;
 				}
 			}
+			if(move->piece == peon && (abs(move->to - move->from) == 16)){
+				if(c == blancas){
+				t->EnPassantSquare = move->to + 8;
+				}
+				if(c == negras){
+				t->EnPassantSquare = move->to - 8;
+				}
+			}
 			break;
 		case 1:
-			/*
-			TODO: En passant, not even genrerated yet
-			*/
+			casilla opponentPawn = c == blancas ? enPassantSq - 8 : enPassantSq + 8;
+			t->piezas[c][move->piece] &= ~(C64(1) << move->from);
+			t->piezas[c][move->piece] |= (C64(1) << move->to);
+			t->piezas[!c][peon] &= ~(C64(1) << opponentPawn);
 			break;
 		case 2:
 			//castling
@@ -754,7 +814,6 @@ void makeMove(Move * move, Tablero * t, color c){
 			t->piezas[c][move->piece] &= ~(C64(1) << move->to);
 			t->piezas[c][move->promoPiece] |= (C64(1) << move->to);
 			break;
-
-			updateBoardCache(t);
 	}
+	updateBoardCache(t);
 }
