@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <math.h>
 //importante
 typedef uint64_t bitboard;
@@ -11,6 +12,7 @@ typedef uint64_t bitboard;
 #define C64(constantU64) constantU64##ULL
 #define BB_SQUARE(sq) (1ULL << (sq))
 #define RANK(r) (C64(0xFF) << (8 * (r)))
+#define C8 ( (uint8_t)123 )
 //enums
 typedef enum{
 	blancas,negras
@@ -40,8 +42,13 @@ typedef struct{
 	bitboard piezas[2][6];
 	bitboard allPieces[2];
 	bitboard allOccupiedSquares;
-	int castlingRights[2]; // 0: no rooks or king move, 1: h: a rank rook already moved 2: h rank rook moved 3: king moved 4: all rooks moved 5: everything moved
+	uint8_t castlingRights;
 }Tablero;
+const uint8_t WHITE_OO = 1;
+const uint8_t WHITE_OOO = 2;
+const uint8_t BLACK_OO = 4;
+const uint8_t BLACK_OOO = 8;
+
 typedef struct{
 	casilla from;
 	casilla to;
@@ -68,8 +75,9 @@ Tablero tablero =  {
 	.piezas = {{0}},
 	.allPieces = {0},
 	.allOccupiedSquares = 0,
-	.castlingRights = {0,0}
+	.castlingRights = 0,
 };
+moveLists movesWhenChecked = {0};
 //funciones
 void printBitboard(bitboard bb);
 void initBoard(Tablero * t);
@@ -88,6 +96,7 @@ void generateBishopMoves(moveLists * ml, color c, Tablero * t);
 void generateQueenMoves(moveLists * ml, color c, Tablero * t);
 float boardEval(Tablero * t, moveLists * white, moveLists * black);
 int isChecked(Tablero * t, moveLists * opponetMoves, casilla king);
+void makeMove(Move * move, Tablero * t, color c);
 
 int main(){
 	bool isPlaying = true;
@@ -136,6 +145,7 @@ void initBoard(Tablero * t){
 	t->piezas[negras][torre] = BB_SQUARE(a8) | BB_SQUARE(h8);
 	t->piezas[negras][reina] = BB_SQUARE(d8);
 	t->piezas[negras][rey] = BB_SQUARE(e8);
+	t->castlingRights = WHITE_OO | WHITE_OOO | BLACK_OO | BLACK_OOO;
 	updateBoardCache(t);
 }
 void updateBoardCache(Tablero * t){
@@ -340,7 +350,6 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 		}
 	}
 	//castling ROOKS IS HANDLED WHEN MAKING MOVE
-	// 0: no rooks or king move, 1: h: a rank rook already moved 2: h rank rook moved 3: king moved 4: all rooks moved 5: everything moved
 	if(c == blancas && from == e1){
 		bitboard rooks = t->piezas[c][torre];
 		while(rooks){
@@ -348,34 +357,31 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 			bool canCastleKingSide = true;
 			casilla rook = __builtin_ctzll(rooks);
 			rooks &= (rooks - 1);
-			if(rook == h1 && (t->castlingRights[c] == 0 || t->castlingRights[c] == 1)){
+			if(rook == h1 && (t->castlingRights & WHITE_OO)){
 				for(casilla sq = f1; sq < h1; sq++){
-					if((BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c]))){
+					if((BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c])) || isAttacked(t,sq,!c)){
 						canCastleKingSide = false;
 					}
 				}
-				if(canCastleKingSide && !(isAttacked(t,g1,!c))){
+				if(canCastleKingSide && !(isAttacked(t,g1,!c) || isAttacked(t,from,!c))){ // is the square we are moving to attacked || is the king in check
 					casilla to = g1;
 					Move move = {from,to,rey,0,2,0};
 					ml->moves[ml->count] = move;
 					ml->count++;
 				}
 			}
-			else if(rook == a1 && (t->castlingRights[c] == 0 || t->castlingRights[c] == 2)){
+			else if(rook == a1 && (t->castlingRights & WHITE_OOO)){
 				for(casilla sq = d1; sq > a1;sq--){
-					if(BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c])){
+					if((BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c])) || isAttacked(t,sq,!c)){
 						canCastleQueenSide = false;
 					}
 				}
-				if(canCastleQueenSide && !(isAttacked(t,c1,!c))){
+				if(canCastleQueenSide && !(isAttacked(t,c1,!c) || isAttacked(t,from,!c))){
 					casilla to = c1;
 					Move move = {from,to,rey,0,2,0};
 					ml->moves[ml->count] = move;
 					ml->count++;
 				}
-			}
-			else{
-				printf("error on castling move generation, prolly an invalid square: %d\n",rook);
 			}
 		}
 	}
@@ -386,27 +392,27 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 			rooks &= (rooks - 1);
 			bool canCastleQueenSide = true;
 			bool canCastleKingSide = true;
-			if(rook == h8 && (t->castlingRights[c] == 0 || t->castlingRights[c] == 1)){
+			if(rook == h8 && (t->castlingRights & BLACK_OO)){
 				for(casilla sq = f8; sq < h8; sq++){
-					if(BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c])){
+					if((BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c])) || isAttacked(t,sq,!c)){
 						canCastleKingSide = false;
 					}
 				}
 
-				if(canCastleKingSide){
+				if(canCastleKingSide && !(isAttacked(t,from,!c) || isAttacked(t,g8, !c))){
 					casilla to = g8;
 					Move move = {from,to,rey,0,2,0};
 					ml->moves[ml->count] = move;
 					ml->count++;
 				}
 			}
-			else if(rook == a8 && (t->castlingRights[c] == 0 || t->castlingRights[c] == 2)){
+			else if(rook == a8 && (t->castlingRights & BLACK_OOO)){
 				for(casilla sq = d8; sq > a8; sq--){
-					if(BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c])){
+					if((BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c])) || isAttacked(t,sq,!c)){
 						canCastleQueenSide = false;
 					}
 				}
-				if(canCastleQueenSide){
+				if(canCastleQueenSide && !(isAttacked(t,from,!c) || isAttacked(t,c8,!c))){
 					casilla to = c8;
 					Move move = {from,to,rey,0,2,0};
 					ml->moves[ml->count] = move;
@@ -453,9 +459,7 @@ void generatePawnMoves(moveLists * ml, color c, Tablero * t){
 			}
 		}
 		if(pawnAttacksLocal & t->allPieces[!c]){
-			pawnAttacksLocal &= t->allPieces[!c];
-			while(pawnAttacksLocal){
-				int capture = 0;
+			pawnAttacksLocal &= t->allPieces[!c]; while(pawnAttacksLocal){ int capture = 0;
 				if(pawnAttacksLocal & t->allPieces[!c]){
 					to = __builtin_ctzll(pawnAttacksLocal);
 					pawnAttacksLocal &= (pawnAttacksLocal - 1);
@@ -629,10 +633,22 @@ void generateQueenMoves(moveLists * ml, color c, Tablero * t){
 // invert if called for black (-boardEval(tablero))
 float boardEval(Tablero * t, moveLists * white, moveLists * black){
 	// queen = 9; rook = 5; bishop = 3; knight = 3; pawn = 1;
+	movesWhenChecked = (moveLists){0};
 	casilla king = __builtin_ctzll(t->piezas[blancas][rey]);
-	if(isChecked(t,black,king) != 0){
+	if(isAttacked(t,king,negras)){
 		//check if checkmate, if it is return 1.0f
-		
+		for(int i = 0; i < white->count; i++){
+			Tablero temp = *t;
+			makeMove(&white->moves[i], &temp, blancas);
+			king = __builtin_ctzll(temp.piezas[blancas][rey]);
+			if(!isAttacked(&temp,king,negras)){
+				movesWhenChecked.moves[movesWhenChecked.count] = white->moves[i];
+				movesWhenChecked.count++;
+			}
+		}
+		if(movesWhenChecked.count == 0){
+			return 1.0f;
+		}
 	}
 	float value =
 	1 * (__builtin_popcountll(t->piezas[blancas][peon]) - __builtin_popcountll(t->piezas[negras][peon])) +
@@ -640,15 +656,105 @@ float boardEval(Tablero * t, moveLists * white, moveLists * black){
 	5 * (__builtin_popcountll(t->piezas[blancas][torre]) - __builtin_popcountll(t->piezas[negras][torre])) +
 	9 * (__builtin_popcountll(t->piezas[blancas][reina]) - __builtin_popcountll(t->piezas[negras][reina])) +
 	0.1 * (white->count - black->count);
-	float scaledValue = tanh(value / 25.0f); 
+	float scaledValue = tanh(value / 25.0f);
 	return scaledValue;
 }
-int isChecked(Tablero * t, moveLists * opponetMoves, casilla king){
-	int checkedBy = 0;
-	for(int i = 0; i < opponetMoves->count; i++){
-		if(opponetMoves->moves[i].to == king){
-			checkedBy++;
-		}
+
+void makeMove(Move * move, Tablero * t, color c){
+	switch(move->special){
+		case 0:
+			if(move->capture != 0){
+				t->piezas[!c][move->capture] &= ~(C64(1) << move->to);
+			}
+			t->piezas[c][move->piece] &= ~(C64(1) << move->from);
+			t->piezas[c][move->piece] |= (C64(1) << move->to);
+			if(c == blancas && move->piece == rey){
+				t->castlingRights &= ~WHITE_OO;
+				t->castlingRights &= ~WHITE_OOO;
+
+			}
+			else if(c == negras && move->piece == rey){
+				t->castlingRights &= ~BLACK_OO;
+				t->castlingRights &=  ~BLACK_OOO;
+			}
+			if(move->capture == torre){
+				switch(move->to){
+					case h1: t->castlingRights &= ~WHITE_OO; break;
+					case a1: t->castlingRights &= ~WHITE_OOO; break;
+					case h8: t->castlingRights &= ~BLACK_OO; break;
+					case a8: t->castlingRights &= ~BLACK_OOO; break;
+					default: break;
+				}
+			}
+			if(move->piece == torre){
+				casilla from = move->from;
+				switch(from){
+					case h1: t->castlingRights &= ~WHITE_OO; break;
+					case a1: t->castlingRights &= ~WHITE_OOO; break;
+					case h8: t->castlingRights &= ~BLACK_OO; break;
+					case a8: t->castlingRights &= ~BLACK_OOO; break; 
+					default: break;
+				}
+			}
+			break;
+		case 1:
+			/*
+			TODO: En passant, not even genrerated yet
+			*/
+			break;
+		case 2:
+			//castling
+			t->piezas[c][move->piece] &= ~(C64(1) << move->from);
+			t->piezas[c][move->piece] |= (C64(1) << move->to);
+			switch(move->to){
+				case g1:
+					if(BB_SQUARE(h1) & t->piezas[c][torre]){
+						t->piezas[c][torre] &= ~(C64(1) << h1);
+						t->piezas[c][torre] |= (C64(1) << f1);
+						t->castlingRights &= ~WHITE_OO;
+						t->castlingRights &= ~WHITE_OOO;
+					}
+					break;
+				case c1:
+					if(BB_SQUARE(a1) & t->piezas[c][torre]){
+						t->piezas[c][torre] &= ~(C64(1) << a1);
+						t->piezas[c][torre] |= (C64(1) << d1);
+						t->castlingRights &= ~WHITE_OO;
+						t->castlingRights &= ~WHITE_OOO;
+					}
+					break;
+				case g8:
+					if(BB_SQUARE(h8) & t->piezas[c][torre]){
+						t->piezas[c][torre] &= ~(C64(1) << h8);
+						t->piezas[c][torre] |= (C64(1) << f8);
+						t->castlingRights &= ~BLACK_OO;
+						t->castlingRights &= ~BLACK_OOO;
+					}
+					break;
+				case c8:
+					if(BB_SQUARE(a8) & t->piezas[c][torre]){
+						t->piezas[c][torre] &= ~(C64(1) << a8);
+						t->piezas[c][torre] |= (C64(1) << d8);	
+						t->castlingRights &= ~BLACK_OO;
+						t->castlingRights &= ~BLACK_OOO;
+					}
+					break;
+				default:
+					printf("invalid castling square %d\n", move->to);
+					break;
+			}
+			break;
+
+		case 3:
+			//promotion
+			t->piezas[c][move->piece] &= ~(C64(1) << move->from);
+			if(move->capture != 0){
+				t->piezas[!c][move->capture] &= ~(C64(1) << move->to);
+			}
+			t->piezas[c][move->piece] &= ~(C64(1) << move->to);
+			t->piezas[c][move->promoPiece] |= (C64(1) << move->to);
+			break;
+
+			updateBoardCache(t);
 	}
-	return checkedBy;
 }
