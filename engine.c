@@ -72,12 +72,7 @@ int rookOffsets[4] = {8,-8,-1,1}; // up, down, left, right
 int bishopOffsets[4] = {-9,-7,7,9}; //up-left, up-right,down-left,down-right
 int QueenOffsets[8] = {8,-8,-1,1,-9,-7,7,9};
 // misc
-Tablero tablero =  {
-	.piezas = {{0}},
-	.allPieces = {0},
-	.allOccupiedSquares = 0,
-	.castlingRights = 0,
-};
+Tablero tablero =  {0};
 moveLists movesWhenChecked[2] = {0};
 bool isChecked[2] = {false};
 //funciones
@@ -114,6 +109,30 @@ int main(){
 		generateAllMoves(!currentColor, &tablero, &white);
 		generateAllMoves(currentColor, &tablero, &black);
 	}
+	Tablero enPassantTest = {0};
+	enPassantTest.piezas[blancas][peon] = BB_SQUARE(e5);
+	enPassantTest.piezas[negras][peon] = BB_SQUARE(f7);
+	printBitboard(enPassantTest.piezas[blancas][peon] | enPassantTest.piezas[negras][peon]);
+	Move blackMove = {
+		.from = f7,
+		.to = f5,
+		.piece = peon,
+		.capture = peon,
+		.special = 0, // 0 normal, 1 en passant, 2 castling, 3 promo,
+		.promoPiece = 0, // 0 none
+	};
+	makeMove(&blackMove,&enPassantTest, negras);
+	printBitboard(enPassantTest.piezas[blancas][peon] | enPassantTest.piezas[negras][peon]);
+	Move whiteMove = {
+		.from = e5,
+		.to = f6,
+		.piece = peon,
+		.capture = peon,
+		.special = 1, // 0 normal, 1 en passant, 2 castling, 3 promo,
+		.promoPiece = 0, // 0 none
+	};
+	makeMove(&whiteMove,&enPassantTest, blancas);
+	printBitboard(enPassantTest.piezas[blancas][peon] | enPassantTest.piezas[negras][peon]);
 }
 //debug
 void printBitboard(bitboard bb){
@@ -749,15 +768,15 @@ void makeMove(Move * move, Tablero * t, color c){
 			}
 			if(move->piece == peon && (abs(move->to - move->from) == 16)){
 				if(c == blancas){
-				t->EnPassantSquare = move->to + 8;
+				t->EnPassantSquare = move->to - 8;
 				}
 				if(c == negras){
-				t->EnPassantSquare = move->to - 8;
+				t->EnPassantSquare = move->to + 8;
 				}
 			}
 			break;
 		case 1:
-			casilla opponentPawn = c == blancas ? enPassantSq - 8 : enPassantSq + 8;
+			casilla opponentPawn = (c == blancas ? enPassantSq - 8 : enPassantSq + 8);
 			t->piezas[c][move->piece] &= ~(C64(1) << move->from);
 			t->piezas[c][move->piece] |= (C64(1) << move->to);
 			t->piezas[!c][peon] &= ~(C64(1) << opponentPawn);
