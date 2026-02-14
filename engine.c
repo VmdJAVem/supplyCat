@@ -73,7 +73,6 @@ int bishopOffsets[4] = {-9,-7,7,9}; //up-left, up-right,down-left,down-right
 int QueenOffsets[8] = {8,-8,-1,1,-9,-7,7,9};
 // misc
 Tablero tablero =  {0};
-moveLists movesWhenChecked[2] = {0};
 bool isChecked[2] = {false};
 //funciones
 void printBitboard(bitboard bb);
@@ -187,31 +186,41 @@ void updateBoardCache(Tablero * t){
 }
 void generateAllMoves(color c, Tablero * t, moveLists * output){
 	output->count = 0;
-	int count = output->count;
+	moveLists temp = {0};
+	int count = temp.count;
 	printf("=== Checking %s King moves ===\n", c == blancas ? "white" : "black");
-	generateKingMoves(output, c, t);
-	printf("=== King moves done, %d moves added\n",output->count - count);
-	count = output->count;
+	generateKingMoves(&temp, c, t);
+	printf("=== King moves done, %d moves added\n",temp.count - count);
+	count = temp.count;
 	printf("=== Checking %s Knight moves ===\n", c == blancas ? "white" : "black");
-	generateKnightMoves(output, c, t);
-	printf("=== Knight moves done, %d moves added\n",output->count);
-	count = output->count;
+	generateKnightMoves(&temp, c, t);
+	printf("=== Knight moves done, %d moves added\n",temp.count);
+	count = temp.count;
 	printf("=== Checking %s Pawn moves ===\n", c == blancas ? "white" : "black");
-	generatePawnMoves(output, c, t);
-	printf("=== Pawn moves done, %d moves added\n",output->count - count);
-	count = output->count;
+	generatePawnMoves(&temp, c, t);
+	printf("=== Pawn moves done, %d moves added\n",temp.count - count);
+	count = temp.count;
 	printf("=== Checking %s Rook moves ===\n", c == blancas ? "white" : "black");
-	generateRookMoves(output, c, t);
-	printf("=== Rook moves done, %d moves added\n",output->count - count);
-	count = output->count;
+	generateRookMoves(&temp, c, t);
+	printf("=== Rook moves done, %d moves added\n",temp.count - count);
+	count = temp.count;
 	printf("=== Checking  %s Bishop moves ===\n", c == blancas ? "white" : "black");
-	generateBishopMoves(output, c, t);
-	printf("=== Bishop moves done, %d moves added\n",output->count - count);
-	count = output->count;
+	generateBishopMoves(&temp, c, t),
+	printf("=== Bishop moves done, %d moves added\n",temp.count - count);
+	count = temp.count;
 	printf("=== Checking %s Queen moves ===\n", c == blancas ? "white" : "black");
-	generateQueenMoves(output, c, t);
-	printf("=== Queen moves done, %d moves added\n",output->count - count);
-	for(int i = 0; i < 4; i++){
+	generateQueenMoves(&temp, c, t);
+	printf("=== Queen moves done, %d moves added\n",temp.count - count);
+	for(int i = 0; i < temp.count; i++){
+		Tablero tempT = *t;
+		makeMove(&temp.moves[i], &tempT, c);
+		casilla king = __builtin_ctzll(tempT.piezas[c][rey]);
+		if(!isAttacked(&tempT, king, !c)){
+			output->moves[output->count] = temp.moves[i];
+			output->count++;
+		}
+	}
+	for(int i = 0; i < 2; i++){
 		printf("\n");
 	}
 }
@@ -686,37 +695,22 @@ void generateQueenMoves(moveLists * ml, color c, Tablero * t){
 }
 float boardEval(Tablero * t, color c){
 	// queen = 9; rook = 5; bishop = 3; knight = 3; pawn = 1;
-	movesWhenChecked[c] = (moveLists){0};
-	moveLists movePerColor[2] = {0};
 	casilla king = __builtin_ctzll(t->piezas[c][rey]);
-	if(isAttacked(t,king,!c)){
-		moveLists pseudoLegalMoves = {0};
-		isChecked[c] = true;
-		Tablero temp = *t;
-		generateAllMoves(c,&temp,&pseudoLegalMoves);
+	moveLists movePerColor[2] = {0};
+	moveLists possibleMoves = {0};
+	generateAllMoves(c,t,&possibleMoves);
 
-		for(int i = 0; i < pseudoLegalMoves.count; i++){
-			makeMove(&pseudoLegalMoves.moves[i], &temp, c);
-			king = __builtin_ctzll(temp.piezas[c][rey]);
-			if(!isAttacked(&temp, king, !c)){
-				movesWhenChecked[c].moves[movesWhenChecked[c].count] = pseudoLegalMoves.moves[i];
-				movesWhenChecked[c].count++;
-			}
-			temp = *t;
-		}
-		if(movesWhenChecked[c].count == 0){
+	if(possibleMoves.count == 0){
+		if(isAttacked(t,king,!c)){
 			return -1.0f;
 		}
-		else{
-		movePerColor[c] = movesWhenChecked[c];
-		generateAllMoves(!c,t,&movePerColor[!c]);
+		else if(possibleMoves.count == 0){
+			return 0.0f;
 		}
 	}
-	else{
-		generateAllMoves(blancas,t,&movePerColor[blancas]);
-		generateAllMoves(negras,t,&movePerColor[negras]);
+	movePerColor[c] = possibleMoves;
+	generateAllMoves(!c,t,&movePerColor[!c]);
 
-	}
 
 	float value =
 		1 * (__builtin_popcountll(t->piezas[c][peon]) - __builtin_popcountll(t->piezas[!c][peon])) +
