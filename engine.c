@@ -2,7 +2,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
-#include <unistd.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <math.h>
@@ -62,6 +61,10 @@ typedef struct{
 	Move moves[256];
 	int count;
 }moveLists;
+typedef struct{
+	Move move;
+	float score;
+} moveScore;
 
 //atack mascs
 bitboard knightAttacks[64];
@@ -92,6 +95,8 @@ void generateBishopMoves(moveLists * ml, color c, Tablero * t);
 void generateQueenMoves(moveLists * ml, color c, Tablero * t);
 float boardEval(Tablero * t, color c);
 void makeMove(Move * move, Tablero * t, color c);
+moveScore negaMax(int depth, Tablero * t, color c);
+float recursiveNegaMax(int depth, Tablero * t, color c);
 
 int main(){
 	bool isPlaying = true;
@@ -108,6 +113,7 @@ int main(){
 		generateAllMoves(!currentColor, &tablero, &white);
 		generateAllMoves(currentColor, &tablero, &black);
 	}
+	printf("En Passant test\n");
 	Tablero enPassantTest = {0};
 	enPassantTest.piezas[blancas][peon] = BB_SQUARE(e5);
 	enPassantTest.piezas[negras][peon] = BB_SQUARE(f7);
@@ -132,6 +138,13 @@ int main(){
 	};
 	makeMove(&whiteMove,&enPassantTest, blancas);
 	printBitboard(enPassantTest.piezas[blancas][peon] | enPassantTest.piezas[negras][peon]);
+	printf("Negamax test\n");
+	Tablero negamaxTest = {0};
+	negamaxTest.piezas[blancas][reina] = BB_SQUARE(d1);
+	negamaxTest.piezas[negras][peon] = (BB_SQUARE(f7) | BB_SQUARE(g7) | BB_SQUARE(h7));
+	negamaxTest.piezas[negras][rey] = (BB_SQUARE(h8));
+	moveScore y = negaMax(4,&negamaxTest, blancas);
+	printf("%f\n", y.score);
 }
 //debug
 void printBitboard(bitboard bb){
@@ -145,6 +158,51 @@ void printBitboard(bitboard bb){
 		printf("\n");
 	}
 	printf("  a b c d e f g h\n\n");
+}
+float recursiveNegaMax(int depth, Tablero * t, color c){
+	moveLists colorToMove = {0};
+	generateAllMoves(c, t, &colorToMove);
+	float bestScore = -INFINITY;
+	if(depth == 0 || colorToMove.count == 0){
+		return boardEval(t, c);
+	}
+
+	for(int i = 0; i < colorToMove.count; i++){
+		Tablero temp = *t;
+		makeMove(&colorToMove.moves[i], &temp, c);
+		float score = -recursiveNegaMax(depth - 1, &temp, !c);
+		if(score > bestScore){
+			bestScore = score;
+		}
+	}
+	return bestScore;
+}
+moveScore negaMax(int depth, Tablero * t, color c){
+	moveLists colorToMove = {0};
+	generateAllMoves(c, t, &colorToMove);
+	float bestScore = -INFINITY;
+	Move bestMove = {0};
+	if(depth == 0 || colorToMove.count == 0){
+		moveScore output = {
+			.move = {0},
+			.score = boardEval(t, c),
+		};
+		return output;
+	}
+	for(int i = 0; i < colorToMove.count; i++){
+		Tablero temp = *t;
+		makeMove(&colorToMove.moves[i], &temp, c);
+		float score = -recursiveNegaMax(depth - 1, &temp, !c);
+		if(score > bestScore){
+			bestScore = score;
+			bestMove = colorToMove.moves[i];
+		}
+	}
+	moveScore output = {
+		.move = bestMove,
+		.score = bestScore
+	};
+	return output;
 }
 void initBoard(Tablero * t){
 	memset(t,0,sizeof(Tablero));
