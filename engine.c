@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <math.h>
+#include <sys/select.h>
+#include <ctype.h>
 //importante
 typedef uint64_t bitboard;
 //macros
@@ -42,7 +44,9 @@ typedef struct{
 	bitboard allPieces[2];
 	bitboard allOccupiedSquares;
 	uint8_t castlingRights;
-	casilla EnPassantSquare;
+	casilla enPassantSquare;
+	int halfmoveClock;
+	int fullMoves;
 }Tablero;
 const uint8_t WHITE_OO = 1;
 const uint8_t WHITE_OOO = 2;
@@ -77,6 +81,9 @@ int QueenOffsets[8] = {8,-8,-1,1,-9,-7,7,9};
 // misc
 Tablero tablero =  {0};
 bool isChecked[2] = {false};
+volatile bool stopRequested = false;
+bool isPlaying = true;
+color colorToMove;
 //funciones
 void printBitboard(bitboard bb);
 void initBoard(Tablero * t);
@@ -96,55 +103,25 @@ void generateQueenMoves(moveLists * ml, color c, Tablero * t);
 float boardEval(Tablero * t, color c);
 void makeMove(Move * move, Tablero * t, color c);
 moveScore negaMax(int depth, Tablero * t, color c);
-float recursiveNegaMax(int depth, Tablero * t, color c);
+float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta);
+void proccesUCICommands(char command[256], Tablero * t);
+bool inputAvaliable();
+tipoDePieza charToPiece(char c);
+void proccesUCICommands(char command[256], Tablero * t);
+casilla stringToSq(const char * sq);
 
 int main(){
-	bool isPlaying = true;
-	color currentColor = blancas;
-	initBoard(&tablero);
-	initAttackTables();
-	printBitboard(tablero.allOccupiedSquares);
-	moveLists white, black;
-	if(currentColor == blancas){
-		generateAllMoves(currentColor, &tablero, &white);
-		generateAllMoves(!currentColor, &tablero, &black);
+	Tablero tablero =   {0};
+	while(true){
+		if(inputAvaliable()){
+			char buffer[256];
+			if(fgets(buffer, sizeof(buffer), stdin)){
+				proccesUCICommands(buffer, &tablero);
+			}
+		}
+
 	}
-	else{
-		generateAllMoves(!currentColor, &tablero, &white);
-		generateAllMoves(currentColor, &tablero, &black);
-	}
-	printf("En Passant test\n");
-	Tablero enPassantTest = {0};
-	enPassantTest.piezas[blancas][peon] = BB_SQUARE(e5);
-	enPassantTest.piezas[negras][peon] = BB_SQUARE(f7);
-	printBitboard(enPassantTest.piezas[blancas][peon] | enPassantTest.piezas[negras][peon]);
-	Move blackMove = {
-		.from = f7,
-		.to = f5,
-		.piece = peon,
-		.capture = peon,
-		.special = 0, // 0 normal, 1 en passant, 2 castling, 3 promo,
-		.promoPiece = 0, // 0 none
-	};
-	makeMove(&blackMove,&enPassantTest, negras);
-	printBitboard(enPassantTest.piezas[blancas][peon] | enPassantTest.piezas[negras][peon]);
-	Move whiteMove = {
-		.from = e5,
-		.to = f6,
-		.piece = peon,
-		.capture = peon,
-		.special = 1, // 0 normal, 1 en passant, 2 castling, 3 promo,
-		.promoPiece = 0, // 0 none
-	};
-	makeMove(&whiteMove,&enPassantTest, blancas);
-	printBitboard(enPassantTest.piezas[blancas][peon] | enPassantTest.piezas[negras][peon]);
-	printf("Negamax test\n");
-	Tablero negamaxTest = {0};
-	negamaxTest.piezas[blancas][reina] = BB_SQUARE(d1);
-	negamaxTest.piezas[negras][peon] = (BB_SQUARE(f7) | BB_SQUARE(g7) | BB_SQUARE(h7));
-	negamaxTest.piezas[negras][rey] = (BB_SQUARE(h8));
-	moveScore y = negaMax(4,&negamaxTest, blancas);
-	printf("%f\n", y.score);
+
 }
 //debug
 void printBitboard(bitboard bb){
@@ -159,29 +136,44 @@ void printBitboard(bitboard bb){
 	}
 	printf("  a b c d e f g h\n\n");
 }
-float recursiveNegaMax(int depth, Tablero * t, color c){
+float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta){
 	moveLists colorToMove = {0};
 	generateAllMoves(c, t, &colorToMove);
-	float bestScore = -INFINITY;
 	if(depth == 0 || colorToMove.count == 0){
 		return boardEval(t, c);
 	}
 
 	for(int i = 0; i < colorToMove.count; i++){
-		Tablero temp = *t;
-		makeMove(&colorToMove.moves[i], &temp, c);
-		float score = -recursiveNegaMax(depth - 1, &temp, !c);
-		if(score > bestScore){
-			bestScore = score;
+		if(!stopRequested){
+			Tablero temp = *t;
+			makeMove(&colorToMove.moves[i], &temp, c);
+			float score = -recursiveNegaMax(depth - 1, &temp, !c, -beta, -alpha);
+			if(inputAvaliable()){
+				char buffer[256];
+				if(fgets(buffer, sizeof(buffer), stdin)){
+					proccesUCICommands(buffer, t);
+				}
+			}
+
+			if(score > alpha){
+				alpha = score;
+			}
+			if(alpha >= beta){
+
+				break;
+			}
 		}
 	}
-	return bestScore;
+	return alpha;
 }
 moveScore negaMax(int depth, Tablero * t, color c){
 	moveLists colorToMove = {0};
 	generateAllMoves(c, t, &colorToMove);
 	float bestScore = -INFINITY;
 	Move bestMove = {0};
+	float alpha = -INFINITY;
+	float beta = +INFINITY;
+	stopRequested = false;
 	if(depth == 0 || colorToMove.count == 0){
 		moveScore output = {
 			.move = {0},
@@ -190,12 +182,22 @@ moveScore negaMax(int depth, Tablero * t, color c){
 		return output;
 	}
 	for(int i = 0; i < colorToMove.count; i++){
-		Tablero temp = *t;
-		makeMove(&colorToMove.moves[i], &temp, c);
-		float score = -recursiveNegaMax(depth - 1, &temp, !c);
-		if(score > bestScore){
-			bestScore = score;
-			bestMove = colorToMove.moves[i];
+		if(!stopRequested){
+			Tablero temp = *t;
+			makeMove(&colorToMove.moves[i], &temp, c);
+
+			float score = -recursiveNegaMax(depth - 1, &temp, !c, -beta, -alpha);
+			if(inputAvaliable()){
+				char buffer[256];
+				if(fgets(buffer, sizeof(buffer), stdin)){
+					proccesUCICommands(buffer, t);
+				}
+			}
+
+			if(score > bestScore){
+				bestScore = score;
+				bestMove = colorToMove.moves[i];
+			}
 		}
 	}
 	moveScore output = {
@@ -217,7 +219,7 @@ void initBoard(Tablero * t){
 
 	//negras
 	t->piezas[negras][peon] = RANK(7 - 1);
-	t->piezas[negras][caballo] = BB_SQUARE(b8) | BB_SQUARE(g8); 
+	t->piezas[negras][caballo] = BB_SQUARE(b8) | BB_SQUARE(g8);
 	t->piezas[negras][alfil] = BB_SQUARE(c8) | BB_SQUARE(f8);
 	t->piezas[negras][torre] = BB_SQUARE(a8) | BB_SQUARE(h8);
 	t->piezas[negras][reina] = BB_SQUARE(d8);
@@ -245,30 +247,12 @@ void updateBoardCache(Tablero * t){
 void generateAllMoves(color c, Tablero * t, moveLists * output){
 	output->count = 0;
 	moveLists temp = {0};
-	int count = temp.count;
-	printf("=== Checking %s King moves ===\n", c == blancas ? "white" : "black");
 	generateKingMoves(&temp, c, t);
-	printf("=== King moves done, %d moves added\n",temp.count - count);
-	count = temp.count;
-	printf("=== Checking %s Knight moves ===\n", c == blancas ? "white" : "black");
 	generateKnightMoves(&temp, c, t);
-	printf("=== Knight moves done, %d moves added\n",temp.count);
-	count = temp.count;
-	printf("=== Checking %s Pawn moves ===\n", c == blancas ? "white" : "black");
 	generatePawnMoves(&temp, c, t);
-	printf("=== Pawn moves done, %d moves added\n",temp.count - count);
-	count = temp.count;
-	printf("=== Checking %s Rook moves ===\n", c == blancas ? "white" : "black");
 	generateRookMoves(&temp, c, t);
-	printf("=== Rook moves done, %d moves added\n",temp.count - count);
-	count = temp.count;
-	printf("=== Checking  %s Bishop moves ===\n", c == blancas ? "white" : "black");
 	generateBishopMoves(&temp, c, t),
-	printf("=== Bishop moves done, %d moves added\n",temp.count - count);
-	count = temp.count;
-	printf("=== Checking %s Queen moves ===\n", c == blancas ? "white" : "black");
-	generateQueenMoves(&temp, c, t);
-	printf("=== Queen moves done, %d moves added\n",temp.count - count);
+		generateQueenMoves(&temp, c, t);
 	for(int i = 0; i < temp.count; i++){
 		Tablero tempT = *t;
 		makeMove(&temp.moves[i], &tempT, c);
@@ -277,9 +261,6 @@ void generateAllMoves(color c, Tablero * t, moveLists * output){
 			output->moves[output->count] = temp.moves[i];
 			output->count++;
 		}
-	}
-	for(int i = 0; i < 2; i++){
-		printf("\n");
 	}
 }
 bool isAttacked(Tablero * t, int square, color attackerColor){
@@ -506,17 +487,11 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t){
 					ml->count++;
 				}
 			}
-			else{
-				printf("error on castling move generation, prolly an invalid square: %d\n",rook);
-			}
 		}
 	}
 }
 void generatePawnMoves(moveLists * ml, color c, Tablero * t){
 	bitboard allPawns = t->piezas[c][peon];
-	/*
-	TODO: En passant
-	*/
 	while(allPawns){
 		casilla from = __builtin_ctzll(allPawns);
 		allPawns &= (allPawns - 1);
@@ -579,14 +554,14 @@ void generatePawnMoves(moveLists * ml, color c, Tablero * t){
 			}
 
 		}
-		if(rank == 4 && t->EnPassantSquare != 0 && c == blancas){
-			if(t->EnPassantSquare == (from + 7)){ // left
+		if(rank == 4 && t->enPassantSquare != 0 && c == blancas){
+			if(t->enPassantSquare == (from + 7)){ // left
 				to = from + 7;
 				Move move = {from,to,peon,0,1,0};
 				ml->moves[ml->count] = move;
 				ml->count++;
 			}
-			if(t->EnPassantSquare == (from  + 9)){ // right
+			if(t->enPassantSquare == (from  + 9)){ // right
 				to = from + 9;
 				Move move = {from,to,peon,0,1,0};
 				ml->moves[ml->count] = move;
@@ -594,14 +569,14 @@ void generatePawnMoves(moveLists * ml, color c, Tablero * t){
 
 			}
 		}
-		else if(rank == 3 && t->EnPassantSquare != 0 && c == negras){
-			if(t->EnPassantSquare == (from - 7)){ // left
+		else if(rank == 3 && t->enPassantSquare != 0 && c == negras){
+			if(t->enPassantSquare == (from - 7)){ // left
 				to = from - 7;
 				Move move = {from,to,peon,0,1,0};
 				ml->moves[ml->count] = move;
 				ml->count++;
 			}
-			if(t->EnPassantSquare == (from - 9)){ // right
+			if(t->enPassantSquare == (from - 9)){ // right
 				to = from - 9;
 				Move move = {from,to,peon,0,1,0};
 				ml->moves[ml->count] = move;
@@ -720,7 +695,7 @@ void generateQueenMoves(moveLists * ml, color c, Tablero * t){
 					j++;
 					to = from + (j * offset);
 				}
-      			}
+			}
 			else if(i >= 4){
 				while(to >= 0 && to < 64 && abs((from % 8) - (to % 8)) == abs((from / 8) - (to / 8))){
 					int capture = 0;
@@ -772,17 +747,21 @@ float boardEval(Tablero * t, color c){
 
 	float value =
 		1 * (__builtin_popcountll(t->piezas[c][peon]) - __builtin_popcountll(t->piezas[!c][peon])) +
-	3 * ((__builtin_popcountll(t->piezas[c][caballo]) - __builtin_popcountll(t->piezas[!c][caballo])) + (__builtin_popcountll(t->piezas[c][alfil]) - __builtin_popcountll(t->piezas[!c][alfil]))) +
-	5 * (__builtin_popcountll(t->piezas[c][torre]) - __builtin_popcountll(t->piezas[!c][torre])) +
-	9 * (__builtin_popcountll(t->piezas[c][reina]) - __builtin_popcountll(t->piezas[!c][reina])) +
-	0.1 * (movePerColor[c].count - movePerColor[!c].count);
+		3 * ((__builtin_popcountll(t->piezas[c][caballo]) - __builtin_popcountll(t->piezas[!c][caballo])) + (__builtin_popcountll(t->piezas[c][alfil]) - __builtin_popcountll(t->piezas[!c][alfil]))) +
+		5 * (__builtin_popcountll(t->piezas[c][torre]) - __builtin_popcountll(t->piezas[!c][torre])) +
+		9 * (__builtin_popcountll(t->piezas[c][reina]) - __builtin_popcountll(t->piezas[!c][reina])) +
+		0.1 * (movePerColor[c].count - movePerColor[!c].count);
 	float scaledValue = tanh(value / 25.0f);
 	return scaledValue;
 }
 
 void makeMove(Move * move, Tablero * t, color c){
-	casilla enPassantSq = t-> EnPassantSquare;
-	t->EnPassantSquare = 0;
+	casilla enPassantSq = t-> enPassantSquare;
+	t->enPassantSquare = -1;
+	t->fullMoves++;
+	if(move->piece == peon){
+		t->halfmoveClock = 0;
+	}
 	switch(move->special){
 		case 0:
 			if(move->capture != 0){
@@ -820,10 +799,10 @@ void makeMove(Move * move, Tablero * t, color c){
 			}
 			if(move->piece == peon && (abs(move->to - move->from) == 16)){
 				if(c == blancas){
-				t->EnPassantSquare = move->to - 8;
+					t->enPassantSquare = move->to - 8;
 				}
 				if(c == negras){
-				t->EnPassantSquare = move->to + 8;
+					t->enPassantSquare = move->to + 8;
 				}
 			}
 			break;
@@ -871,7 +850,6 @@ void makeMove(Move * move, Tablero * t, color c){
 					}
 					break;
 				default:
-					printf("invalid castling square %d\n", move->to);
 					break;
 			}
 			break;
@@ -887,4 +865,125 @@ void makeMove(Move * move, Tablero * t, color c){
 			break;
 	}
 	updateBoardCache(t);
+}
+bool inputAvaliable(){
+	struct timeval tv = {0, 0};
+	fd_set fds;
+	FD_ZERO(&fds);
+	FD_SET(0, &fds);
+	int ret = select(1, &fds, NULL, NULL, &tv);
+	return (ret >  0);
+}
+void proccesUCICommands(char command[256], Tablero * t){
+	if(strcmp(command, "quit\n") == 0){
+		exit(0);
+		return;
+	}
+	else if(strcmp(command, "stop\n") == 0){
+		stopRequested = true;
+		return;
+	}
+	else if(strcmp(command, "uci\n") == 0){
+		printf("id name Supplycat\n");
+		printf("id author  arkar\n");
+		printf("uciok\n");
+		return;
+	}
+	else if(strcmp(command, "isready\n") == 0){
+		printf("readyok\n");
+		return;
+	}
+	char * firstCommand = strtok(command, "\t\n\r\f\v");
+	if(strcmp(firstCommand, "position") == 0){
+		char * secondCommand = strtok(NULL, "\t\n\r\f\v");
+		if(strcmp(secondCommand, "startpos") == 0){
+			initBoard(t);
+		}
+		else if(strcmp(secondCommand, "fen") == 0){
+			char * fenString = strtok(NULL, " ");
+			int rank = 7;
+			int file = 0;
+			for(int i = 0; fenString[i] != '\0'; i++){
+				char currentChar = fenString[i];
+				if(currentChar == '/'){
+					rank--;
+					file = 0;
+					continue;
+				}
+				if(isdigit(currentChar)){
+					file += currentChar - '0';
+					continue;
+				}
+				else{
+					color c = isupper(currentChar) ? blancas : negras;
+					tipoDePieza piece = charToPiece(currentChar);
+					casilla square = rank * 8 + file;
+					t->piezas[c][piece] |= BB_SQUARE(square);
+					file++;
+				}
+			}
+			updateBoardCache(t);
+			char * activeColor = strtok(NULL, " ");
+			colorToMove = strcmp(activeColor, "w") ? negras : blancas;
+			char * castlingRights = strtok(NULL, " ");
+			if(strchr(castlingRights, '-') != NULL){
+				t->castlingRights = 0;
+			}
+			else if(strchr(castlingRights, 'K') != NULL){
+				t->castlingRights |= WHITE_OO;
+			}
+			else if(strchr(castlingRights, 'Q') != NULL){
+				t->castlingRights |= WHITE_OOO;
+			}
+			else if(strchr(castlingRights, 'k') != NULL){
+				t->castlingRights |= BLACK_OO;
+			}
+			else if(strchr(castlingRights, 'q') != NULL){
+				t->castlingRights |= BLACK_OOO;
+			}
+			char * enPassantSquare = strtok(NULL, " ");
+			if(strchr(enPassantSquare, '-')){
+				t->enPassantSquare = -1;
+			}
+			else{
+				casilla sq = stringToSq(enPassantSquare);
+				t->enPassantSquare  = sq;
+			}
+			char * halfmoveClock = strtok(NULL, " ");
+			t->halfmoveClock = atoi(halfmoveClock);
+			char * fullMove = strtok(NULL, " ");
+			t->fullMoves = atoi(fullMove);
+			/*
+			TODO: moves tokens
+			*/
+		}
+	}
+}
+tipoDePieza charToPiece(char c){
+	switch (c){
+		case 'p':
+		case 'P':
+			return peon;
+		case 'r':
+		case 'R':
+			return torre;
+		case 'n':
+		case 'N':
+			return caballo;
+		case 'b':
+		case 'B':
+			return alfil;
+		case 'q':
+		case 'Q':
+			return reina;
+		case 'k':
+		case 'K':
+			return rey;
+	}
+	printf("error: invalid fen\n");
+}
+casilla stringToSq(const char * sq){
+	int file = tolower(sq[0]) - 'a';
+	int rank = sq[1] - '1';
+	return rank * 8 + file;
 }
