@@ -953,9 +953,49 @@ void proccesUCICommands(char command[256], Tablero * t){
 			t->halfmoveClock = atoi(halfmoveClock);
 			char * fullMove = strtok(NULL, " ");
 			t->fullMoves = atoi(fullMove);
-			/*
-			TODO: moves tokens
-			*/
+			char * movesToken = strtok(NULL, " ");
+			if(strcmp(movesToken,  "moves") == 0){
+				char * move = strtok(NULL, " ");
+				while(move  !=  NULL){
+					casilla to = (stringToSq(move + 2));
+					casilla from = (stringToSq(move));
+					tipoDePieza promo = 0;
+					tipoDePieza piece;
+					int special = 0;
+					tipoDePieza capture = 0;
+					for(int i = peon; i <= rey; i++){
+						if(BB_SQUARE(from) & t->piezas[colorToMove][i]){
+							piece = i;
+							break;
+						}
+					}
+					if(move[4] != '\0'){
+						promo = charToPiece(move[4]);
+						special = 3;
+					}
+					if(BB_SQUARE(to) & t->allPieces[!colorToMove]){
+						for(int p =  peon; p <= rey; p++){
+							if(t->piezas[!colorToMove][p] & BB_SQUARE(to)){
+								capture = p;
+								break;
+							}
+						}
+					}
+					if(piece == peon && to == t->enPassantSquare){
+						special = 1;
+					}
+					if (piece == rey) {
+						if ((colorToMove == blancas && from == e1 && (to == g1 || to == c1)) ||
+							(colorToMove == negras && from == e8 && (to == g8 || to == c8))) {
+							special = 2;
+						}
+					}
+					Move newMove = {from, to, piece, capture, special, promo};
+					makeMove(&newMove, t, colorToMove);
+					move = strtok(NULL, " ");
+					colorToMove = !colorToMove;
+				}
+			}
 		}
 	}
 }
@@ -987,3 +1027,4 @@ casilla stringToSq(const char * sq){
 	int rank = sq[1] - '1';
 	return rank * 8 + file;
 }
+
