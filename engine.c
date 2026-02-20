@@ -1,3 +1,4 @@
+#define _POSIX_C_SOURCE 199309L
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -7,7 +8,8 @@
 #include <math.h>
 #include <sys/select.h>
 #include <ctype.h>
-//importante
+#include <time.h>
+#include <unistd.h>
 typedef uint64_t bitboard;
 //macros
 #define C64(constantU64) constantU64##ULL
@@ -21,8 +23,7 @@ typedef enum{
 typedef enum{
 	peon, caballo, alfil, torre, reina, rey
 }tipoDePieza;
-typedef enum {
-	// Rank 1
+typedef enum { // Rank 1
 	a1, b1, c1, d1, e1, f1, g1, h1,
 	// Rank 2
 	a2, b2, c2, d2, e2, f2, g2, h2,
@@ -69,7 +70,16 @@ typedef struct{
 	Move move;
 	float score;
 } moveScore;
-
+typedef struct{
+	int wtime;
+	int btime;
+	int winc;
+	int binc;
+	int movestogo;
+	int depth;
+	int movetime;
+	bool infinite;
+}goParameters;
 //atack mascs
 bitboard knightAttacks[64];
 bitboard kingAttacks[64];
@@ -84,6 +94,16 @@ bool isChecked[2] = {false};
 volatile bool stopRequested = false;
 bool isPlaying = true;
 color colorToMove;
+goParameters parameters = {
+	.wtime = -1,
+	.btime = -1,
+	.winc = -1,
+	.binc = -1,
+	.movestogo = -1,
+	.depth = -1,
+	.movetime = -1,
+	.infinite = false,
+};
 //funciones
 void printBitboard(bitboard bb);
 void initBoard(Tablero * t);
@@ -102,16 +122,23 @@ void generateBishopMoves(moveLists * ml, color c, Tablero * t);
 void generateQueenMoves(moveLists * ml, color c, Tablero * t);
 float boardEval(Tablero * t, color c);
 void makeMove(Move * move, Tablero * t, color c);
-moveScore negaMax(int depth, Tablero * t, color c);
+moveScore negaMax(Tablero * t, color c,int timeLimit);
 float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta);
 void proccesUCICommands(char command[256], Tablero * t);
 bool inputAvaliable();
 tipoDePieza charToPiece(char c);
-void proccesUCICommands(char command[256], Tablero * t);
 casilla stringToSq(const char * sq);
-
+char pieceToChar(tipoDePieza piece);
+char * moveToStr(Move * move);
+moveScore negaMaxFixedDepth(Tablero *t, color c, int depth);
 int main(){
-	Tablero tablero =   {0};
+	Tablero tablero = {0};
+	Tablero test = {0};
+	initBoard(&test);
+	moveLists testList = {0};
+	generateAllMoves(blancas, &test, &testList);
+	printBitboard(test.allOccupiedSquares);
+	printf("%d\n", testList.count);
 	while(true){
 		if(inputAvaliable()){
 			char buffer[256];
@@ -121,7 +148,6 @@ int main(){
 		}
 
 	}
-
 }
 //debug
 void printBitboard(bitboard bb){
@@ -142,19 +168,18 @@ float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta)
 	if(depth == 0 || colorToMove.count == 0){
 		return boardEval(t, c);
 	}
+	while(!stopRequested){
+		if(inputAvaliable()){
+			char buffer[256];
+			if(fgets(buffer, sizeof(buffer), stdin)){
+				proccesUCICommands(buffer, t);
+			}
+		}
 
-	for(int i = 0; i < colorToMove.count; i++){
-		if(!stopRequested){
+		for(int i = 0; i < colorToMove.count; i++){
 			Tablero temp = *t;
 			makeMove(&colorToMove.moves[i], &temp, c);
 			float score = -recursiveNegaMax(depth - 1, &temp, !c, -beta, -alpha);
-			if(inputAvaliable()){
-				char buffer[256];
-				if(fgets(buffer, sizeof(buffer), stdin)){
-					proccesUCICommands(buffer, t);
-				}
-			}
-
 			if(score > alpha){
 				alpha = score;
 			}
@@ -166,47 +191,99 @@ float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta)
 	}
 	return alpha;
 }
-moveScore negaMax(int depth, Tablero * t, color c){
+moveScore negaMax(Tablero * t, color c,int timeLimit){
 	moveLists colorToMove = {0};
 	generateAllMoves(c, t, &colorToMove);
+	printf("DEBUG: negaMax generated %d moves for %s\n", colorToMove.count, c == blancas ? "white" : "black");
 	float bestScore = -INFINITY;
 	Move bestMove = {0};
 	float alpha = -INFINITY;
 	float beta = +INFINITY;
 	stopRequested = false;
-	if(depth == 0 || colorToMove.count == 0){
+	struct timespec start;
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	if(colorToMove.count == 0){
 		moveScore output = {
 			.move = {0},
 			.score = boardEval(t, c),
 		};
+		printf("DEBUG: board state\n");
+		printBitboard(t->allOccupiedSquares);
 		return output;
 	}
-	for(int i = 0; i < colorToMove.count; i++){
-		if(!stopRequested){
-			Tablero temp = *t;
-			makeMove(&colorToMove.moves[i], &temp, c);
-
-			float score = -recursiveNegaMax(depth - 1, &temp, !c, -beta, -alpha);
+	int depth = 1;
+	while(!stopRequested){
+		Move localBestMove = bestMove;
+		float localBestScore = bestScore;
+		for(int i = 0; i < colorToMove.count; i++){
 			if(inputAvaliable()){
 				char buffer[256];
 				if(fgets(buffer, sizeof(buffer), stdin)){
 					proccesUCICommands(buffer, t);
 				}
 			}
-
-			if(score > bestScore){
-				bestScore = score;
-				bestMove = colorToMove.moves[i];
+			Tablero temp = *t;
+			makeMove(&colorToMove.moves[i], &temp, c);
+			float score = -recursiveNegaMax(depth, &temp, !c, -beta, -alpha);
+			if(score > localBestScore){
+				localBestScore = score;
+				localBestMove = colorToMove.moves[i];
 			}
+			if(timeLimit != -1){
+				struct timespec now;
+				clock_gettime(CLOCK_MONOTONIC, &now);
+				long long elapsed = (now.tv_sec - start.tv_sec) * 1000LL + (now.tv_nsec - start.tv_nsec) / 1000000LL;
+				if(elapsed >= timeLimit){
+					stopRequested = true;
+					break;
+				}
+			}
+
+		}
+		depth++;
+		if(localBestScore > bestScore){
+			bestScore = localBestScore;
+			alpha = localBestScore;
+			bestMove = localBestMove;
 		}
 	}
-	moveScore output = {
+	moveScore bm = {
 		.move = bestMove,
 		.score = bestScore
 	};
-	return output;
+	return bm;
+}
+moveScore negaMaxFixedDepth(Tablero *t, color c, int depth){
+	moveLists colorToMove = {0};
+	generateAllMoves(c, t, &colorToMove);
+
+	if(colorToMove.count == 0){
+		moveScore output = {.move = {0}, .score = boardEval(t, c)};
+		return output;
+	}
+
+	float bestScore = -INFINITY;
+	Move bestMove = {0};
+	float alpha = -INFINITY;
+	float beta = INFINITY;
+
+	for(int i = 0; i < colorToMove.count; i++){
+		Tablero temp = *t;
+		makeMove(&colorToMove.moves[i], &temp, c);
+		float score = -recursiveNegaMax(depth - 1, &temp, !c, -beta, -alpha);
+
+		if(score > bestScore){
+			bestScore = score;
+			bestMove = colorToMove.moves[i];
+			alpha = score;  // tighten alpha for root pruning
+		}
+	}
+
+	moveScore result = {.move = bestMove, .score = bestScore};
+	return result;
 }
 void initBoard(Tablero * t){
+	printf("DEBUG: initBoard called\n");
 	memset(t,0,sizeof(Tablero));
 
 	//blancas
@@ -875,6 +952,7 @@ bool inputAvaliable(){
 	return (ret >  0);
 }
 void proccesUCICommands(char command[256], Tablero * t){
+	fflush(stdout);
 	if(strcmp(command, "quit\n") == 0){
 		exit(0);
 		return;
@@ -895,9 +973,58 @@ void proccesUCICommands(char command[256], Tablero * t){
 	}
 	char * firstCommand = strtok(command, "\t\n\r\f\v");
 	if(strcmp(firstCommand, "position") == 0){
+		printBitboard(t->allOccupiedSquares);
 		char * secondCommand = strtok(NULL, "\t\n\r\f\v");
+		printf("DEBUG: secondCommand = '%s'\n", secondCommand);
 		if(strcmp(secondCommand, "startpos") == 0){
 			initBoard(t);
+			printf("DEBUG: after initBoard, white pawns = %lx\n", t->piezas[blancas][peon]);
+			colorToMove = blancas;
+			char * movesToken = strtok(NULL, " ");
+			if(movesToken != NULL && strcmp(movesToken,  "moves") == 0){
+				char * move = strtok(NULL, " ");
+				while(move  !=  NULL){
+					casilla to = (stringToSq(move + 2));
+					casilla from = (stringToSq(move));
+					tipoDePieza promo = 0;
+					tipoDePieza piece;
+					int special = 0;
+					tipoDePieza capture = 0;
+					for(int i = peon; i <= rey; i++){
+						if(BB_SQUARE(from) & t->piezas[colorToMove][i]){
+							piece = i;
+							break;
+						}
+					}
+					if(move[4] != '\0'){
+						promo = charToPiece(move[4]);
+						special = 3;
+					}
+					if(BB_SQUARE(to) & t->allPieces[!colorToMove]){
+						for(int p =  peon; p <= rey; p++){
+							if(t->piezas[!colorToMove][p] & BB_SQUARE(to)){
+								capture = p;
+								break;
+							}
+						}
+					}
+					if(piece == peon && to == t->enPassantSquare){
+						special = 1;
+					}
+					if (piece == rey) {
+						if ((colorToMove == blancas && from == e1 && (to == g1 || to == c1)) ||
+							(colorToMove == negras && from == e8 && (to == g8 || to == c8))) {
+							special = 2;
+						}
+					}
+					Move newMove = {from, to, piece, capture, special, promo};
+					makeMove(&newMove, t, colorToMove);
+					move = strtok(NULL, " ");
+					colorToMove = !colorToMove;
+				}
+			}
+
+			printBitboard(t->allOccupiedSquares);
 		}
 		else if(strcmp(secondCommand, "fen") == 0){
 			char * fenString = strtok(NULL, " ");
@@ -954,7 +1081,7 @@ void proccesUCICommands(char command[256], Tablero * t){
 			char * fullMove = strtok(NULL, " ");
 			t->fullMoves = atoi(fullMove);
 			char * movesToken = strtok(NULL, " ");
-			if(strcmp(movesToken,  "moves") == 0){
+			if(movesToken != NULL && strcmp(movesToken,  "moves") == 0){
 				char * move = strtok(NULL, " ");
 				while(move  !=  NULL){
 					casilla to = (stringToSq(move + 2));
@@ -998,6 +1125,99 @@ void proccesUCICommands(char command[256], Tablero * t){
 			}
 		}
 	}
+	else if(strcmp(firstCommand, "go") == 0 || strcmp(firstCommand, "go\n") == 0){
+		parameters = (goParameters){
+			.wtime = -1,
+			.btime = -1,
+			.winc = -1,
+			.binc = -1,
+			.movestogo = -1,
+			.depth = -1,
+			.movetime = -1,
+			.infinite = false,
+		};
+		char * secondCommand = strtok(NULL, "\t\n\r\f\v");
+		char possible2ndCommands[8][10] = {"wtime", "btime", "winc", "binc", "movestogo", "depth", "movetime", "infinite"};
+		if(secondCommand == NULL){
+			printf("DEBUG: before negaMax, white pawns = %lx\n", t->piezas[blancas][peon]);
+			moveScore bestMove = negaMax(t, colorToMove,  -1);
+			printf("bestmove %s\n", moveToStr(&bestMove.move));
+		}
+		else{
+			while(secondCommand != NULL){
+				for(int i = 0; i <= 7; i++){
+					if(strcmp(possible2ndCommands[i], secondCommand) == 0){
+						char * valueStr = strtok(NULL, "\t\n\r\f\v");
+						int value = atoi(valueStr);
+						switch(i){
+							case 0:
+								parameters.wtime = value;
+								break;
+							case 1:
+								parameters.btime = value;
+								break;
+							case 2:
+								parameters.winc = value;
+								break;
+							case 3:
+								parameters.binc = value;
+								break;
+							case 4:
+								parameters.movestogo = value;
+								break;
+							case 5:
+								parameters.depth = value;
+								break;
+							case 6:
+								parameters.movetime = value;
+								break;
+							case 7:
+								parameters.infinite = true;
+								break;
+						}
+					}
+				}
+			secondCommand = strtok(NULL, "\t\n\r\f\v");
+			}
+			if(parameters.depth != -1){
+				moveScore bestMove = negaMaxFixedDepth(t, colorToMove, parameters.depth);
+				printf("bestmove %s\n", moveToStr(&bestMove.move));
+
+			}
+			else if(parameters.movetime != -1){
+				moveScore bestMove = negaMax(t, colorToMove, parameters.movetime);
+				printf("bestmove %s\n", moveToStr(&bestMove.move));
+			}
+			else if(parameters.infinite){
+				moveScore bestMove = negaMax(t, colorToMove,  -1);
+				printf("bestmove %s\n", moveToStr(&bestMove.move));
+			}
+			else if(parameters.wtime != -1 && parameters.btime != -1){
+				int clockTime = 0;
+				int increment = 0;
+				if(colorToMove == blancas){
+					clockTime = parameters.wtime;
+					if(parameters.winc != -1){
+						increment = parameters.winc;
+					}
+				}
+				else if(colorToMove == negras){
+					clockTime = parameters.btime;
+					if(parameters.binc != -1){
+						increment = parameters.binc;
+					}
+				}
+				int timeForThisMove  = clockTime / (parameters.movestogo == -1 ? parameters.movestogo : 40) + increment;
+				timeForThisMove -= ((increment / timeForThisMove) * 100);
+				if(timeForThisMove < 100){
+					timeForThisMove = 100;
+				}
+				moveScore bestMove = negaMax(t, colorToMove, timeForThisMove);
+				printf("bestmove %s\n", moveToStr(&bestMove.move));
+
+			}
+		}
+	}
 }
 tipoDePieza charToPiece(char c){
 	switch (c){
@@ -1027,4 +1247,41 @@ casilla stringToSq(const char * sq){
 	int rank = sq[1] - '1';
 	return rank * 8 + file;
 }
+char pieceToChar(tipoDePieza piece){
+	switch (piece){
+		case peon:
+			return 'p';
+		case torre:
+			return 'r';
+		case caballo:
+			return 'n';
+		case alfil:
+			return 'b';
+		case reina:
+			return 'q';
+		case rey:
+			return 'k';
+	}
+	printf("error: invalid fen\n");
+}
+char * moveToStr(Move * move){
+	static char result[6];
+	int fromFile = move->from % 8;
+	int fromRank = move->from / 8;
+	
+	int toFile = move->to % 8;
+	int toRank = move->to / 8;
 
+	result[0] = 'a' + fromFile;
+	result[1] = '1' + fromRank;
+	result[2] = 'a' + toFile;
+	result[3] = '1' + toRank;
+	if(move->special == 3){
+		result[4] = pieceToChar(move->promoPiece);
+		result[5] = '\0';
+	}
+	else{
+		result[4] = '\0';
+	}
+	return result;
+}
