@@ -94,6 +94,7 @@ bool isChecked[2] = {false};
 volatile bool stopRequested = false;
 bool isPlaying = true;
 color colorToMove;
+bool debug = false;
 goParameters parameters = {
 	.wtime = -1,
 	.btime = -1,
@@ -104,6 +105,7 @@ goParameters parameters = {
 	.movetime = -1,
 	.infinite = false,
 };
+long long nodes = 0;
 //funciones
 void printBitboard(bitboard bb);
 void initBoard(Tablero * t);
@@ -163,38 +165,47 @@ void printBitboard(bitboard bb){
 	printf("  a b c d e f g h\n\n");
 }
 float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta){
+	nodes++;
+	if(debug){
+		printf("DEBUG: recursicveNegaMax start, colorToMove = %d\n", colorToMove);
+	}
 	moveLists colorToMove = {0};
 	generateAllMoves(c, t, &colorToMove);
 	if(depth == 0 || colorToMove.count == 0){
 		return boardEval(t, c);
 	}
-	while(!stopRequested){
-		if(inputAvaliable()){
-			char buffer[256];
-			if(fgets(buffer, sizeof(buffer), stdin)){
-				proccesUCICommands(buffer, t);
-			}
+	if(inputAvaliable()){
+		char buffer[256];
+		if(fgets(buffer, sizeof(buffer), stdin)){
+			proccesUCICommands(buffer, t);
 		}
+	}
 
-		for(int i = 0; i < colorToMove.count; i++){
-			Tablero temp = *t;
-			makeMove(&colorToMove.moves[i], &temp, c);
-			float score = -recursiveNegaMax(depth - 1, &temp, !c, -beta, -alpha);
-			if(score > alpha){
-				alpha = score;
-			}
-			if(alpha >= beta){
+	for(int i = 0; i < colorToMove.count; i++){
+		Tablero temp = *t;
+		makeMove(&colorToMove.moves[i], &temp, c);
+		float score = -recursiveNegaMax(depth - 1, &temp, !c, -beta, -alpha);
+		if(score > alpha){
+			alpha = score;
+		}
+		if(alpha >= beta){
 
-				break;
-			}
+			break;
 		}
 	}
 	return alpha;
 }
 moveScore negaMax(Tablero * t, color c,int timeLimit){
+	if(debug){
+		printf("DEBUG: negaMax start, colorToMove = %d\n", colorToMove);
+	}
+	fflush(stdout);
 	moveLists colorToMove = {0};
 	generateAllMoves(c, t, &colorToMove);
-	printf("DEBUG: negaMax generated %d moves for %s\n", colorToMove.count, c == blancas ? "white" : "black");
+	if(debug){
+		printf("DEBUG: generateAllMoves returned %d moves\n", colorToMove.count);
+		fflush(stdout);
+	}
 	float bestScore = -INFINITY;
 	Move bestMove = {0};
 	float alpha = -INFINITY;
@@ -207,8 +218,10 @@ moveScore negaMax(Tablero * t, color c,int timeLimit){
 			.move = {0},
 			.score = boardEval(t, c),
 		};
-		printf("DEBUG: board state\n");
-		printBitboard(t->allOccupiedSquares);
+		if(debug){
+			printf("DEBUG: board state\n");
+			printBitboard(t->allOccupiedSquares);
+		}
 		return output;
 	}
 	int depth = 1;
@@ -227,6 +240,7 @@ moveScore negaMax(Tablero * t, color c,int timeLimit){
 			float score = -recursiveNegaMax(depth, &temp, !c, -beta, -alpha);
 			if(score > localBestScore){
 				localBestScore = score;
+				alpha = score;
 				localBestMove = colorToMove.moves[i];
 			}
 			if(timeLimit != -1){
@@ -238,7 +252,10 @@ moveScore negaMax(Tablero * t, color c,int timeLimit){
 					break;
 				}
 			}
-
+		}
+		else{
+			quietMoves.moves[quietMoves.count] = colorToMove.moves[i];
+			quietMoves.count++;
 		}
 		depth++;
 		if(localBestScore > bestScore){
@@ -251,6 +268,7 @@ moveScore negaMax(Tablero * t, color c,int timeLimit){
 		.move = bestMove,
 		.score = bestScore
 	};
+	printf("%lld nodes searched\n", nodes);
 	return bm;
 }
 moveScore negaMaxFixedDepth(Tablero *t, color c, int depth){
@@ -280,10 +298,13 @@ moveScore negaMaxFixedDepth(Tablero *t, color c, int depth){
 	}
 
 	moveScore result = {.move = bestMove, .score = bestScore};
+	printf("%lld nodes searched\n", nodes);
 	return result;
 }
 void initBoard(Tablero * t){
-	printf("DEBUG: initBoard called\n");
+	if(debug){
+		printf("DEBUG: initBoard called\n");
+	}
 	memset(t,0,sizeof(Tablero));
 
 	//blancas
@@ -805,6 +826,9 @@ void generateQueenMoves(moveLists * ml, color c, Tablero * t){
 }
 float boardEval(Tablero * t, color c){
 	// queen = 9; rook = 5; bishop = 3; knight = 3; pawn = 1;
+	if(t->piezas[c][rey] == 0){
+		return 0;
+	};
 	casilla king = __builtin_ctzll(t->piezas[c][rey]);
 	moveLists movePerColor[2] = {0};
 	moveLists possibleMoves = {0};
@@ -943,6 +967,117 @@ void makeMove(Move * move, Tablero * t, color c){
 	}
 	updateBoardCache(t);
 }
+void unmakeMove(Move * move, Tablero * t, color c){
+	casilla enPassantSq = t-> enPassantSquare;
+	t->enPassantSquare = -1;
+	t->fullMoves--;
+	if(move->piece == peon){
+		t->halfmoveClock = 0;
+	}
+	switch(move->special){
+		case 0:
+			if(move->capture != 0){
+				t->piezas[!c][move->capture] &= ~(C64(1) << move->to);
+			}
+			t->piezas[c][move->piece] &= ~(C64(1) << move->from);
+			t->piezas[c][move->piece] |= (C64(1) << move->to);
+			if(c == blancas && move->piece == rey){
+				t->castlingRights &= ~WHITE_OO;
+				t->castlingRights &= ~WHITE_OOO;
+
+			}
+			else if(c == negras && move->piece == rey){
+				t->castlingRights &= ~BLACK_OO;
+				t->castlingRights &=  ~BLACK_OOO;
+			}
+			if(move->capture == torre){
+				switch(move->to){
+					case h1: t->castlingRights &= ~WHITE_OO; break;
+					case a1: t->castlingRights &= ~WHITE_OOO; break;
+					case h8: t->castlingRights &= ~BLACK_OO; break;
+					case a8: t->castlingRights &= ~BLACK_OOO; break;
+					default: break;
+				}
+			}
+			if(move->piece == torre){
+				casilla from = move->from;
+				switch(from){
+					case h1: t->castlingRights &= ~WHITE_OO; break;
+					case a1: t->castlingRights &= ~WHITE_OOO; break;
+					case h8: t->castlingRights &= ~BLACK_OO; break;
+					case a8: t->castlingRights &= ~BLACK_OOO; break; 
+					default: break;
+				}
+			}
+			if(move->piece == peon && (abs(move->to - move->from) == 16)){
+				if(c == blancas){
+					t->enPassantSquare = move->to - 8;
+				}
+				if(c == negras){
+					t->enPassantSquare = move->to + 8;
+				}
+			}
+			break;
+		case 1:
+			casilla opponentPawn = (c == blancas ? enPassantSq - 8 : enPassantSq + 8);
+			t->piezas[c][move->piece] &= ~(C64(1) << move->from);
+			t->piezas[c][move->piece] |= (C64(1) << move->to);
+			t->piezas[!c][peon] &= ~(C64(1) << opponentPawn);
+			break;
+		case 2:
+			//castling
+			t->piezas[c][move->piece] &= ~(C64(1) << move->from);
+			t->piezas[c][move->piece] |= (C64(1) << move->to);
+			switch(move->to){
+				case g1:
+					if(BB_SQUARE(h1) & t->piezas[c][torre]){
+						t->piezas[c][torre] &= ~(C64(1) << h1);
+						t->piezas[c][torre] |= (C64(1) << f1);
+						t->castlingRights &= ~WHITE_OO;
+						t->castlingRights &= ~WHITE_OOO;
+					}
+					break;
+				case c1:
+					if(BB_SQUARE(a1) & t->piezas[c][torre]){
+						t->piezas[c][torre] &= ~(C64(1) << a1);
+						t->piezas[c][torre] |= (C64(1) << d1);
+						t->castlingRights &= ~WHITE_OO;
+						t->castlingRights &= ~WHITE_OOO;
+					}
+					break;
+				case g8:
+					if(BB_SQUARE(h8) & t->piezas[c][torre]){
+						t->piezas[c][torre] &= ~(C64(1) << h8);
+						t->piezas[c][torre] |= (C64(1) << f8);
+						t->castlingRights &= ~BLACK_OO;
+						t->castlingRights &= ~BLACK_OOO;
+					}
+					break;
+				case c8:
+					if(BB_SQUARE(a8) & t->piezas[c][torre]){
+						t->piezas[c][torre] &= ~(C64(1) << a8);
+						t->piezas[c][torre] |= (C64(1) << d8);	
+						t->castlingRights &= ~BLACK_OO;
+						t->castlingRights &= ~BLACK_OOO;
+					}
+					break;
+				default:
+					break;
+			}
+			break;
+
+		case 3:
+			//promotion
+			t->piezas[c][move->piece] &= ~(C64(1) << move->from);
+			if(move->capture != 0){
+				t->piezas[!c][move->capture] &= ~(C64(1) << move->to);
+			}
+			t->piezas[c][move->piece] &= ~(C64(1) << move->to);
+			t->piezas[c][move->promoPiece] |= (C64(1) << move->to);
+			break;
+	}
+	updateBoardCache(t);
+}
 bool inputAvaliable(){
 	struct timeval tv = {0, 0};
 	fd_set fds;
@@ -971,14 +1106,30 @@ void proccesUCICommands(char command[256], Tablero * t){
 		printf("readyok\n");
 		return;
 	}
-	char * firstCommand = strtok(command, "\t\n\r\f\v");
+	else if(strcmp(command, "debug\n") == 0){
+		debug = !debug;
+		return;
+	}
+	if(debug){
+		printf("DEBUG: full command = '%s'\n", command);
+		fflush(stdout);
+	}
+	char * firstCommand = strtok(command, " \t\n\r\f\v");
+	if(debug){
+		printf("DEBUG: firstCommand = '%s'\n", firstCommand);
+		fflush(stdout);
+	}
 	if(strcmp(firstCommand, "position") == 0){
 		printBitboard(t->allOccupiedSquares);
-		char * secondCommand = strtok(NULL, "\t\n\r\f\v");
-		printf("DEBUG: secondCommand = '%s'\n", secondCommand);
+		char * secondCommand = strtok(NULL, " \t\n\r\f\v");
+		if(debug){
+			printf("DEBUG: secondCommand = '%s'\n", secondCommand);
+		}
 		if(strcmp(secondCommand, "startpos") == 0){
 			initBoard(t);
-			printf("DEBUG: after initBoard, white pawns = %lx\n", t->piezas[blancas][peon]);
+			if(debug){
+				printf("DEBUG: after initBoard, white pawns = %lx\n", t->piezas[blancas][peon]);
+			}
 			colorToMove = blancas;
 			char * movesToken = strtok(NULL, " ");
 			if(movesToken != NULL && strcmp(movesToken,  "moves") == 0){
@@ -1136,10 +1287,12 @@ void proccesUCICommands(char command[256], Tablero * t){
 			.movetime = -1,
 			.infinite = false,
 		};
-		char * secondCommand = strtok(NULL, "\t\n\r\f\v");
+		char * secondCommand = strtok(NULL, " \t\n\r\f\v");
 		char possible2ndCommands[8][10] = {"wtime", "btime", "winc", "binc", "movestogo", "depth", "movetime", "infinite"};
 		if(secondCommand == NULL){
-			printf("DEBUG: before negaMax, white pawns = %lx\n", t->piezas[blancas][peon]);
+			if(debug){
+				printf("DEBUG: before negaMax, white pawns = %lx\n", t->piezas[blancas][peon]);
+			}
 			moveScore bestMove = negaMax(t, colorToMove,  -1);
 			printf("bestmove %s\n", moveToStr(&bestMove.move));
 		}
@@ -1147,29 +1300,29 @@ void proccesUCICommands(char command[256], Tablero * t){
 			while(secondCommand != NULL){
 				for(int i = 0; i <= 7; i++){
 					if(strcmp(possible2ndCommands[i], secondCommand) == 0){
-						char * valueStr = strtok(NULL, "\t\n\r\f\v");
-						int value = atoi(valueStr);
+						char * valueStr = strtok(NULL, " \t\n\r\f\v");
 						switch(i){
 							case 0:
-								parameters.wtime = value;
+								parameters.wtime = atoi(valueStr);
 								break;
 							case 1:
-								parameters.btime = value;
+								parameters.btime = atoi(valueStr);
 								break;
 							case 2:
-								parameters.winc = value;
+								parameters.winc = atoi(valueStr);
 								break;
 							case 3:
-								parameters.binc = value;
+								parameters.binc = atoi(valueStr);
 								break;
 							case 4:
-								parameters.movestogo = value;
+								parameters.movestogo = atoi(valueStr);
 								break;
 							case 5:
-								parameters.depth = value;
+
+								parameters.depth = atoi(valueStr);
 								break;
 							case 6:
-								parameters.movetime = value;
+								parameters.movetime = atoi(valueStr);
 								break;
 							case 7:
 								parameters.infinite = true;
@@ -1177,7 +1330,7 @@ void proccesUCICommands(char command[256], Tablero * t){
 						}
 					}
 				}
-			secondCommand = strtok(NULL, "\t\n\r\f\v");
+			secondCommand = strtok(NULL, " \t\n\r\f\v");
 			}
 			if(parameters.depth != -1){
 				moveScore bestMove = negaMaxFixedDepth(t, colorToMove, parameters.depth);
@@ -1189,7 +1342,7 @@ void proccesUCICommands(char command[256], Tablero * t){
 				printf("bestmove %s\n", moveToStr(&bestMove.move));
 			}
 			else if(parameters.infinite){
-				moveScore bestMove = negaMax(t, colorToMove,  -1);
+				moveScore bestMove = negaMax(t, colorToMove, -1);
 				printf("bestmove %s\n", moveToStr(&bestMove.move));
 			}
 			else if(parameters.wtime != -1 && parameters.btime != -1){
