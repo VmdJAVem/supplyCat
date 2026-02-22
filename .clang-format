@@ -1,0 +1,6 @@
+# Barebones Linux‑style tab‑only indentation
+BasedOnStyle: LLVM # Start from a clean, well‑known base
+UseTab: Always # Use tabs for indentation
+IndentWidth: 8 # One tab = 8 columns
+TabWidth: 8 # Display tabs as 8 spaces
+PointerAlignment: Middle
