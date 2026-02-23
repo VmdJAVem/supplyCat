@@ -15,10 +15,14 @@ typedef uint64_t bitboard;
 #define BB_SQUARE(sq) (1ULL << (sq))
 #define RANK(r) (C64(0xFF) << (8 * (r)))
 #define C8 ((uint8_t)123)
+#define MAX_DEPTH 64
 // enums
 typedef enum { blancas, negras } color;
 typedef enum { peon, caballo, alfil, torre, reina, rey } tipoDePieza;
-typedef enum { // Rank 1
+int sortingValues[6] = {100, 300, 350, 500, 900};
+// clangd_format off
+typedef enum {
+	// Rank 1
 	a1,
 	b1,
 	c1,
@@ -131,6 +135,10 @@ typedef struct {
 	int movetime;
 	bool infinite;
 } goParameters;
+typedef struct {
+	int sortingScore;
+	Move move;
+} moveSort;
 // atack mascs
 bitboard knightAttacks[64];
 bitboard kingAttacks[64];
@@ -140,11 +148,11 @@ bitboard rookMask[64][4];
 bitboard bishopMask[64][4];
 // misc
 Tablero tablero = {0};
-bool isChecked[2] = {false};
 volatile bool stopRequested = false;
 bool isPlaying = true;
 color colorToMove;
 bool debug = false;
+Move killerMoves[MAX_DEPTH][2] = {0};
 goParameters parameters = {
     .wtime = -1,
     .btime = -1,
@@ -156,6 +164,56 @@ goParameters parameters = {
     .infinite = false,
 };
 long long nodes = 0;
+int positionalValues[2][6][64] = {
+    // blancas
+    {// peon
+     {0,  0,  0,  0,  0,  0,  0,  0,  50, 50, 50, 50, 50, 50, 50, 50, 30, 30, 30, 40, 40, 30,
+      30, 30, 20, 20, 20, 30, 30, 20, 20, 20, 10, 10, 10, 20, 20, 10, 10, 10, 5,  5,  10, 10,
+      10, 10, 5,  5,  0,  0,  0,  5,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0},
+     // caballo
+     {-50, -40, -30, -30, -30, -30, -40, -50, -40, -20, 0,   0,	  0,   0,   -20, -40, -30, 0,	10,  15, 15, 10,
+      0,   -30, -30, 5,	  15,  20,  20,	 15,  5,   -30, -30, 0,	  15,  20,  20,	 15,  0,   -30, -30, 5,	 10, 15,
+      15,  10,	5,   -30, -40, -20, 0,	 5,   5,   0,	-20, -40, -50, -40, -30, -30, -30, -30, -40, -50},
+     // alfil
+     {-20, -10, -10, -10, -10, -10, -10, -20, -10, 0,	0,   0,	  0,   0,   0,	 -10, -10, 0,	5,   10, 10, 5,
+      0,   -10, -10, 5,	  5,   10,  10,	 5,   5,   -10, -10, 0,	  10,  10,  10,	 10,  0,   -10, -10, 10, 10, 10,
+      10,  10,	10,  -10, -10, 5,   0,	 0,   0,   0,	5,   -10, -20, -10, -10, -10, -10, -10, -10, -20},
+     // torre
+     {0,  0, 0, 0, 0, 0, 0, 0,	5,  10, 10, 10, 10, 10, 10, 5,	-5, 0, 0, 0, 0, 0, 0, -5, -5, 0, 0, 0, 0, 0, 0, -5,
+      -5, 0, 0, 0, 0, 0, 0, -5, -5, 0,	0,  0,	0,  0,	0,  -5, -5, 0, 0, 0, 0, 0, 0, -5, 0,  0, 0, 5, 5, 0, 0, 0},
+     // reina
+     {-20, -10, -10, -5,  -5,  -10, -10, -20, -10, 0,  0, 0,   0,   0,	 0,   -10, -10, 0,   5,	  5,  5, 5,
+      0,   -10, -5,  0,	  5,   5,   5,	 5,   0,   -5, 0, 0,   5,   5,	 5,   5,   0,	-5,  -10, 5,  5, 5,
+      5,   5,	0,   -10, -10, 0,   5,	 0,   0,   0,  0, -10, -20, -10, -10, -5,  -5,	-10, -10, -20},
+     // rey
+     {-30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40,
+      -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -20, -30, -30, -40, -40, -30, -30, -20, -10, -20, -20, -20,
+      -20, -20, -20, -10, 20,  20,  0,	 0,   0,   0,	20,  20,  20,  30,  10,	 0,   0,   10,	30,  20}},
+    // negras
+    {// peon
+     {0,  0,  0,  0,  0,  0,  0,  0,  50, 50, 50, 50, 50, 50, 50, 50, 30, 30, 30, 40, 40, 30,
+      30, 30, 20, 20, 20, 30, 30, 20, 20, 20, 10, 10, 10, 20, 20, 10, 10, 10, 5,  5,  10, 10,
+      10, 10, 5,  5,  0,  0,  0,  5,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0},
+     // caballo
+     {-50, -40, -30, -30, -30, -30, -40, -50, -40, -20, 0,   0,	  0,   0,   -20, -40, -30, 0,	10,  15, 15, 10,
+      0,   -30, -30, 5,	  15,  20,  20,	 15,  5,   -30, -30, 0,	  15,  20,  20,	 15,  0,   -30, -30, 5,	 10, 15,
+      15,  10,	5,   -30, -40, -20, 0,	 5,   5,   0,	-20, -40, -50, -40, -30, -30, -30, -30, -40, -50},
+     // alfil
+     {-20, -10, -10, -10, -10, -10, -10, -20, -10, 0,	0,   0,	  0,   0,   0,	 -10, -10, 0,	5,   10, 10, 5,
+      0,   -10, -10, 5,	  5,   10,  10,	 5,   5,   -10, -10, 0,	  10,  10,  10,	 10,  0,   -10, -10, 10, 10, 10,
+      10,  10,	10,  -10, -10, 5,   0,	 0,   0,   0,	5,   -10, -20, -10, -10, -10, -10, -10, -10, -20},
+     // torre
+     {0,  0, 0, 5, 5, 0, 0, 0,	-5, 0, 0, 0, 0, 0, 0, -5, -5, 0,  0,  0,  0,  0,  0,  -5, -5, 0, 0, 0, 0, 0, 0, -5,
+      -5, 0, 0, 0, 0, 0, 0, -5, -5, 0, 0, 0, 0, 0, 0, -5, 5,  10, 10, 10, 10, 10, 10, 5,  0,  0, 0, 0, 0, 0, 0, 0},
+     // reina
+     {-20, -10, -10, -5,  -5,  -10, -10, -20, -10, 0,  5,  0,	0,   0,	  0,   -10, -10, 5,   5,   5,  5, 5,
+      0,   -10, 0,   0,	  5,   5,   5,	 5,   0,   -5, -5, 0,	5,   5,	  5,   5,   0,	 -5,  -10, 0,  5, 5,
+      5,   5,	0,   -10, -10, 0,   0,	 0,   0,   0,  0,  -10, -20, -10, -10, -5,  -5,	 -10, -10, -20},
+     // rey
+     {20,  30,	10,  0,	  0,   10,  30,	 20,  20,  20,	0,   0,	  0,   0,   20,	 20,  -10, -20, -20, -20, -20, -20,
+      -20, -10, -20, -30, -30, -40, -40, -30, -30, -20, -30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50,
+      -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30}}};
+
 // funciones
 void printBitboard(bitboard bb);
 void initBoard(Tablero * t);
@@ -183,6 +241,12 @@ casilla stringToSq(const char * sq);
 char pieceToChar(tipoDePieza piece);
 char * moveToStr(Move * move);
 moveScore negaMaxFixedDepth(Tablero * t, color c, int depth);
+bool isEqualMoves(Move * x, Move * y);
+int partition(moveSort arr[], int low, int high);
+void swapMoveSort(moveSort * a, moveSort * b);
+void moveToMoveSort(moveLists * input, moveSort output[], int depth);
+moveSort scoreMoveForSorting(Move * move, int depth);
+int compareMoveSort(const void * a, const void * b);
 int main() {
 	Tablero tablero = {0};
 	Tablero test = {0};
@@ -190,6 +254,7 @@ int main() {
 	moveLists testList = {0};
 	generateAllMoves(blancas, &test, &testList);
 	printBitboard(test.allOccupiedSquares);
+	printf("%d\n", positionalValues[blancas][caballo][1]);
 	printf("%d\n", testList.count);
 	initAttackTables();
 	while (true) {
@@ -217,14 +282,14 @@ void printBitboard(bitboard bb) {
 float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta) {
 	nodes++;
 	if (debug) {
-		printf("DEBUG: recursicveNegaMax start, colorToMove = %d\n", colorToMove);
+		printf("DEBUG: recursiveNegaMax start, colorToMove = %d\n", colorToMove);
 	}
 	moveLists colorToMove = {0};
 	generateAllMoves(c, t, &colorToMove);
 	if (depth == 0 || colorToMove.count == 0) {
 		return boardEval(t, c);
 	}
-	if (nodes % 1024) {
+	if (nodes % 1024 == 0) {
 		if (inputAvaliable()) {
 			char buffer[256];
 			if (fgets(buffer, sizeof(buffer), stdin)) {
@@ -232,16 +297,26 @@ float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta)
 			}
 		}
 	}
-
+	moveSort moves[256];
+	moveToMoveSort(&colorToMove, moves, depth);
+	qsort(moves, colorToMove.count, sizeof(moveSort), compareMoveSort);
 	for (int i = 0; i < colorToMove.count; i++) {
 		Tablero temp = *t;
-		makeMove(&colorToMove.moves[i], &temp, c);
+		Move move = moves[i].move;
+		makeMove(&move, &temp, c);
 		float score = -recursiveNegaMax(depth - 1, &temp, !c, -beta, -alpha);
 		if (score > alpha) {
 			alpha = score;
 		}
 		if (alpha >= beta) {
-
+			if (moves[i].move.capture == 0 && moves[i].move.capture != 3) {
+				if (isEqualMoves(&move, &killerMoves[depth][0])) {
+					continue;
+				} else {
+					killerMoves[depth][1] = killerMoves[depth][0];
+					killerMoves[depth][0] = move;
+				}
+			}
 			break;
 		}
 	}
@@ -1132,6 +1207,23 @@ float boardEval(Tablero * t, color c) {
 	}
 	movePerColor[c] = possibleMoves;
 	generateAllMoves(!c, t, &movePerColor[!c]);
+	float positional = 0;
+	for (tipoDePieza p = 0; p <= rey; p++) {
+		bitboard pieces = t->piezas[c][p];
+		while (pieces) {
+			int sq = __builtin_ctzll(pieces);
+			pieces &= pieces - 1;
+			positional += positionalValues[c][p][sq];
+		}
+	}
+	for (tipoDePieza p = 0; p <= rey; p++) {
+		bitboard pieces = t->piezas[!c][p];
+		while (pieces) {
+			int sq = __builtin_ctzll(pieces);
+			pieces &= pieces - 1;
+			positional -= positionalValues[!c][p][sq];
+		}
+	}
 
 	float value =
 	    1 * (__builtin_popcountll(t->piezas[c][peon]) - __builtin_popcountll(t->piezas[!c][peon])) +
@@ -1140,6 +1232,7 @@ float boardEval(Tablero * t, color c) {
 	    5 * (__builtin_popcountll(t->piezas[c][torre]) - __builtin_popcountll(t->piezas[!c][torre])) +
 	    9 * (__builtin_popcountll(t->piezas[c][reina]) - __builtin_popcountll(t->piezas[!c][reina])) +
 	    0.1 * (movePerColor[c].count - movePerColor[!c].count);
+	value += positional;
 	float scaledValue = tanh(value / 25.0f);
 	return scaledValue;
 }
@@ -1204,134 +1297,6 @@ void makeMove(Move * move, Tablero * t, color c) {
 			}
 		}
 		if (move->piece == peon && (abs(move->to - move->from) == 16)) {
-			if (c == blancas) {
-				t->enPassantSquare = move->to - 8;
-			}
-			if (c == negras) {
-				t->enPassantSquare = move->to + 8;
-			}
-		}
-		break;
-	case 1:
-		casilla opponentPawn = (c == blancas ? enPassantSq - 8 : enPassantSq + 8);
-		t->piezas[c][move->piece] &= ~(C64(1) << move->from);
-		t->piezas[c][move->piece] |= (C64(1) << move->to);
-		t->piezas[!c][peon] &= ~(C64(1) << opponentPawn);
-		break;
-	case 2:
-		// castling
-		t->piezas[c][move->piece] &= ~(C64(1) << move->from);
-		t->piezas[c][move->piece] |= (C64(1) << move->to);
-		switch (move->to) {
-		case g1:
-			if (BB_SQUARE(h1) & t->piezas[c][torre]) {
-				t->piezas[c][torre] &= ~(C64(1) << h1);
-				t->piezas[c][torre] |= (C64(1) << f1);
-				t->castlingRights &= ~WHITE_OO;
-				t->castlingRights &= ~WHITE_OOO;
-			}
-			break;
-		case c1:
-			if (BB_SQUARE(a1) & t->piezas[c][torre]) {
-				t->piezas[c][torre] &= ~(C64(1) << a1);
-				t->piezas[c][torre] |= (C64(1) << d1);
-				t->castlingRights &= ~WHITE_OO;
-				t->castlingRights &= ~WHITE_OOO;
-			}
-			break;
-		case g8:
-			if (BB_SQUARE(h8) & t->piezas[c][torre]) {
-				t->piezas[c][torre] &= ~(C64(1) << h8);
-				t->piezas[c][torre] |= (C64(1) << f8);
-				t->castlingRights &= ~BLACK_OO;
-				t->castlingRights &= ~BLACK_OOO;
-			}
-			break;
-		case c8:
-			if (BB_SQUARE(a8) & t->piezas[c][torre]) {
-				t->piezas[c][torre] &= ~(C64(1) << a8);
-				t->piezas[c][torre] |= (C64(1) << d8);
-				t->castlingRights &= ~BLACK_OO;
-				t->castlingRights &= ~BLACK_OOO;
-			}
-			break;
-		default:
-			break;
-		}
-		break;
-
-	case 3:
-		// promotion
-		t->piezas[c][move->piece] &= ~(C64(1) << move->from);
-		if (move->capture != 0) {
-			t->piezas[!c][move->capture] &= ~(C64(1) << move->to);
-		}
-		t->piezas[c][move->piece] &= ~(C64(1) << move->to);
-		t->piezas[c][move->promoPiece] |= (C64(1) << move->to);
-		break;
-	}
-	updateBoardCache(t);
-}
-void unmakeMove(Move * move, Tablero * t, color c) {
-	casilla enPassantSq = t->enPassantSquare;
-	t->enPassantSquare = -1;
-	t->fullMoves--;
-	if (move->piece == peon) {
-		t->halfmoveClock = 0;
-	}
-	switch (move->special) {
-	case 0:
-		if (move->capture != 0) {
-			t->piezas[!c][move->capture] &= ~(C64(1) << move->to);
-		}
-		t->piezas[c][move->piece] &= ~(C64(1) << move->from);
-		t->piezas[c][move->piece] |= (C64(1) << move->to);
-		if (c == blancas && move->piece == rey) {
-			t->castlingRights &= ~WHITE_OO;
-			t->castlingRights &= ~WHITE_OOO;
-
-		} else if (c == negras && move->piece == rey) {
-			t->castlingRights &= ~BLACK_OO;
-			t->castlingRights &= ~BLACK_OOO;
-		}
-		if (move->capture == torre) {
-			switch (move->to) {
-			case h1:
-				t->castlingRights &= ~WHITE_OO;
-				break;
-			case a1:
-				t->castlingRights &= ~WHITE_OOO;
-				break;
-			case h8:
-				t->castlingRights &= ~BLACK_OO;
-				break;
-			case a8:
-				t->castlingRights &= ~BLACK_OOO;
-				break;
-			default:
-				break;
-			}
-		}
-		if (move->piece == torre) {
-			casilla from = move->from;
-			switch (from) {
-			case h1:
-				t->castlingRights &= ~WHITE_OO;
-				break;
-			case a1:
-				t->castlingRights &= ~WHITE_OOO;
-				break;
-			case h8:
-				t->castlingRights &= ~BLACK_OO;
-				break;
-			case a8:
-				t->castlingRights &= ~BLACK_OOO;
-				break;
-			default:
-				break;
-			}
-		}
-		if (move->piece == peon && ((move->to - move->from) == 16)) {
 			if (c == blancas) {
 				t->enPassantSquare = move->to - 8;
 			}
@@ -1749,4 +1714,66 @@ char * moveToStr(Move * move) {
 		result[4] = '\0';
 	}
 	return result;
+}
+bool isEqualMoves(Move * x, Move * y) {
+	if ((x->to == y->to) && (x->from == y->from) && (x->piece == y->piece) && (x->promoPiece == y->promoPiece)) {
+		return true;
+	} else {
+		return false;
+	}
+}
+moveSort scoreMoveForSorting(Move * move, int depth) {
+	int score = 0;
+	if (move->capture != 0) {
+		score += 10000 + (sortingValues[move->capture] - sortingValues[move->piece]);
+	} else {
+		if (isEqualMoves(move, &killerMoves[depth][0]) || isEqualMoves(move, &killerMoves[depth][1])) {
+			score += 8000;
+		}
+	}
+	if (move->special == 3) {
+		score += 15000 + sortingValues[move->promoPiece];
+	}
+	moveSort x = {score, *move};
+	return x;
+}
+void moveToMoveSort(moveLists * input, moveSort output[], int depth) {
+	for (int i = 0; i < input->count; i++) {
+		output[i] = scoreMoveForSorting(&input->moves[i], depth);
+	}
+}
+void swapMoveSort(moveSort * a, moveSort * b) {
+	moveSort temp = *a;
+	*a = *b;
+	*b = temp;
+}
+int partition(moveSort arr[], int low, int high) {
+
+	// Choose the pivot
+	int pivot = arr[high].sortingScore;
+
+	// Index of smaller element and indicates
+	// the right position of pivot found so far
+	int i = low - 1;
+
+	// Traverse arr[low..high] and move all smaller
+	// elements to the left side. Elements from low to
+	// i are smaller after every iteration
+	for (int j = low; j <= high - 1; j++) {
+		if (arr[j].sortingScore > pivot) {
+			i++;
+			swapMoveSort(&arr[i], &arr[j]);
+		}
+	}
+
+	// Move pivot after smaller elements and
+	// return its position
+	swapMoveSort(&arr[i + 1], &arr[high]);
+	return i + 1;
+}
+int compareMoveSort(const void * a, const void * b) {
+	const moveSort * ma = (const moveSort *)a;
+	const moveSort * mb = (const moveSort *)b;
+	// Descending order: higher score first
+	return mb->sortingScore - ma->sortingScore;
 }
