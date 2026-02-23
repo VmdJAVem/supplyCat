@@ -4,3 +4,4 @@ UseTab: Always # Use tabs for indentation
 IndentWidth: 8 # One tab = 8 columns
 TabWidth: 8 # Display tabs as 8 spaces
 PointerAlignment: Middle
+ColumnLimit: 120
