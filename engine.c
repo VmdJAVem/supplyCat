@@ -727,7 +727,7 @@ void generateKnightMoves(moveLists * ml, color c, Tablero * t) {
 		while (attacks) {
 			casilla to = __builtin_ctzll(attacks);
 			attacks &= (attacks - 1);
-			int capture = 0;
+			int capture = -1;
 			if (BB_SQUARE(to) & t->allPieces[!c]) {
 				for (int piece = peon; piece <= rey; piece++) {
 					if (t->piezas[!c][piece] & BB_SQUARE(to)) {
@@ -755,7 +755,7 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t) {
 	bitboard attacks = kingAttacks[from] & (~t->allPieces[c]);
 	for (int i = 0; i < 64; i++) {
 		if (attacks & (C64(1) << i)) {
-			int capture = 0;
+			int capture = -1;
 			if (BB_SQUARE(i) & t->allPieces[!c]) {
 				for (int piece = peon; piece <= rey; piece++) {
 					if (t->piezas[!c][piece] & BB_SQUARE(i)) {
@@ -880,7 +880,7 @@ void generatePawnMoves(moveLists * ml, color c, Tablero * t) {
 		if (pawnAttacksLocal & t->allPieces[!c]) {
 			pawnAttacksLocal &= t->allPieces[!c];
 			while (pawnAttacksLocal) {
-				int capture = 0;
+				int capture = -1;
 				if (pawnAttacksLocal & t->allPieces[!c]) {
 					to = __builtin_ctzll(pawnAttacksLocal);
 					pawnAttacksLocal &= (pawnAttacksLocal - 1);
@@ -944,7 +944,7 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t) {
 						ml->count++;
 					}
 					if (BB_SQUARE(blockerSq) & t->allPieces[!c]) {
-						int capture = 0;
+						int capture = -1;
 						for (int p = peon; p < rey; p++) {
 							if (t->piezas[!c][p] & BB_SQUARE(blockerSq)) {
 								capture = p;
@@ -976,7 +976,7 @@ void generateRookMoves(moveLists * ml, color c, Tablero * t) {
 						ml->count++;
 					}
 					if (BB_SQUARE(blockerSq) & t->allPieces[!c]) {
-						int capture = 0;
+						int capture = -1;
 						for (int p = 0; p < rey; p++) {
 							if (t->piezas[!c][p] & BB_SQUARE(blockerSq)) {
 								capture = p;
@@ -1022,7 +1022,7 @@ void generateBishopMoves(moveLists * ml, color c, Tablero * t) {
 						ml->count++;
 					}
 					if (BB_SQUARE(blockerSq) & t->allPieces[!c]) {
-						int capture = 0;
+						int capture = -1;
 						for (int p = peon; p < rey; p++) {
 							if (t->piezas[!c][p] & BB_SQUARE(blockerSq)) {
 								capture = p;
@@ -1054,7 +1054,7 @@ void generateBishopMoves(moveLists * ml, color c, Tablero * t) {
 						ml->count++;
 					}
 					if (BB_SQUARE(blockerSq) & t->allPieces[!c]) {
-						int capture = 0;
+						int capture = -1;
 						for (int p = 0; p < rey; p++) {
 							if (t->piezas[!c][p] & BB_SQUARE(blockerSq)) {
 								capture = p;
@@ -1099,7 +1099,7 @@ void generateQueenMoves(moveLists * ml, color c, Tablero * t) {
 						ml->count++;
 					}
 					if (BB_SQUARE(blockerSq) & t->allPieces[!c]) {
-						int capture = 0;
+						int capture = -1;
 						for (int p = peon; p < rey; p++) {
 							if (t->piezas[!c][p] & BB_SQUARE(blockerSq)) {
 								capture = p;
@@ -1131,7 +1131,7 @@ void generateQueenMoves(moveLists * ml, color c, Tablero * t) {
 						ml->count++;
 					}
 					if (BB_SQUARE(blockerSq) & t->allPieces[!c]) {
-						int capture = 0;
+						int capture = -1;
 						for (int p = 0; p < rey; p++) {
 							if (t->piezas[!c][p] & BB_SQUARE(blockerSq)) {
 								capture = p;
@@ -1169,7 +1169,7 @@ void generateQueenMoves(moveLists * ml, color c, Tablero * t) {
 						ml->count++;
 					}
 					if (BB_SQUARE(blockerSq) & t->allPieces[!c]) {
-						int capture = 0;
+						int capture = -1;
 						for (int p = peon; p < rey; p++) {
 							if (t->piezas[!c][p] & BB_SQUARE(blockerSq)) {
 								capture = p;
@@ -1201,7 +1201,7 @@ void generateQueenMoves(moveLists * ml, color c, Tablero * t) {
 						ml->count++;
 					}
 					if (BB_SQUARE(blockerSq) & t->allPieces[!c]) {
-						int capture = 0;
+						int capture = -1;
 						for (int p = 0; p < rey; p++) {
 							if (t->piezas[!c][p] & BB_SQUARE(blockerSq)) {
 								capture = p;
@@ -1286,7 +1286,7 @@ void makeMove(Move * move, Tablero * t, color c) {
 	}
 	switch (move->special) {
 	case 0:
-		if (move->capture != 0) {
+		if (move->capture != -1) {
 			t->piezas[!c][move->capture] &= ~(C64(1) << move->to);
 		}
 		t->piezas[c][move->piece] &= ~(C64(1) << move->from);
@@ -1417,29 +1417,23 @@ void makeMove(Move * move, Tablero * t, color c) {
 	case 3:
 		// promotion
 		t->piezas[c][move->piece] &= ~(C64(1) << move->from);
-		if (move->capture != 0) {
+		if (move->capture != -1) {
 			t->piezas[!c][move->capture] &= ~(C64(1) << move->to);
 		}
 		t->piezas[c][move->piece] &= ~(C64(1) << move->to);
 		t->piezas[c][move->promoPiece] |= (C64(1) << move->to);
-		// incremental updates
-		t->allPieces[c] &= ~(BB_SQUARE(move->from));
-		t->allPieces[c] |= BB_SQUARE(move->to);
-		t->allOccupiedSquares &= ~(BB_SQUARE(move->from));
-		t->allOccupiedSquares |= BB_SQUARE(move->to);
-		if (move->capture != 0) {
-			t->allPieces[!c] &= ~(BB_SQUARE(move->to));
-		}
 		break;
 	}
-	if (move->special != 3) {
-		t->allPieces[c] &= ~(BB_SQUARE(move->from));
-		t->allPieces[c] |= BB_SQUARE(move->to);
-		t->allOccupiedSquares &= ~(BB_SQUARE(move->from));
-		t->allOccupiedSquares |= BB_SQUARE(move->to);
-		if (move->capture != 0) {
-			t->allPieces[!c] &= ~(BB_SQUARE(move->to));
-		}
+	t->allPieces[c] &= ~(BB_SQUARE(move->from));
+	t->allPieces[c] |= BB_SQUARE(move->to);
+	t->allOccupiedSquares &= ~(BB_SQUARE(move->from));
+	t->allOccupiedSquares |= BB_SQUARE(move->to);
+	if (move->capture != -1) {
+		t->allPieces[!c] &= ~(BB_SQUARE(move->to));
+	}
+	// zobrist
+	t->hash ^= zobrist.pieces[c][move->piece][move->from];
+	if (move->capture != -1) {
 	}
 }
 bool inputAvaliable() {
@@ -1833,7 +1827,7 @@ static inline bool isEqualMoves(Move * x, Move * y) {
 }
 moveSort scoreMoveForSorting(Move * move, int depth) {
 	int score = 0;
-	if (move->capture != 0) {
+	if (move->capture != -1) {
 		score += 10000 + (sortingValues[move->capture] - sortingValues[move->piece]);
 	} else {
 		if (debug) {
