@@ -219,7 +219,7 @@ void printBitboard(bitboard bb);
 void initBoard(Tablero * t);
 void updateBoardCache(Tablero * t);
 void generateAllMoves(color c, Tablero * t, moveLists * output);
-bool isAttacked(Tablero * t, int square, color attackerColor);
+static inline bool isAttacked(Tablero * t, int square, color attackerColor);
 bitboard computeKnightAttacks(casilla sq);
 bitboard computeKingAttacks(casilla sq);
 bitboard computePawnAttacks(color c, casilla sq);
@@ -248,14 +248,6 @@ void moveToMoveSort(moveLists * input, moveSort output[], int depth);
 moveSort scoreMoveForSorting(Move * move, int depth);
 int compareMoveSort(const void * a, const void * b);
 int main() {
-	Tablero tablero = {0};
-	Tablero test = {0};
-	initBoard(&test);
-	moveLists testList = {0};
-	generateAllMoves(blancas, &test, &testList);
-	printBitboard(test.allOccupiedSquares);
-	printf("%d\n", positionalValues[blancas][caballo][1]);
-	printf("%d\n", testList.count);
 	initAttackTables();
 	while (true) {
 		if (inputAvaliable()) {
@@ -282,14 +274,14 @@ void printBitboard(bitboard bb) {
 float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta) {
 	nodes++;
 	if (debug) {
-		printf("DEBUG: recursiveNegaMax start, colorToMove = %d\n", colorToMove);
+		printf("DEBUG: recursiveNegaMax start, colorToMove = %d\n", c);
 	}
 	moveLists colorToMove = {0};
 	generateAllMoves(c, t, &colorToMove);
 	if (depth == 0 || colorToMove.count == 0) {
 		return boardEval(t, c);
 	}
-	if (nodes % 1024 == 0) {
+	if (nodes % 8192 == 0) {
 		if (inputAvaliable()) {
 			char buffer[256];
 			if (fgets(buffer, sizeof(buffer), stdin)) {
@@ -356,7 +348,7 @@ moveScore negaMax(Tablero * t, color c, int timeLimit) {
 		Move localBestMove = bestMove;
 		float localBestScore = bestScore;
 		for (int i = 0; i < colorToMove.count; i++) {
-			if (nodes % 1024 == 0) {
+			if (nodes % 8192 == 0) {
 				if (inputAvaliable()) {
 					char buffer[256];
 					if (fgets(buffer, sizeof(buffer), stdin)) {
@@ -475,7 +467,7 @@ void generateAllMoves(color c, Tablero * t, moveLists * output) {
 		}
 	}
 }
-bool isAttacked(Tablero * t, int square, color attackerColor) {
+static inline bool isAttacked(Tablero * t, int square, color attackerColor) {
 	if (kingAttacks[square] & t->piezas[attackerColor][rey]) {
 		return true;
 	}
@@ -659,6 +651,8 @@ void initAttackTables() {
 			to += 9;
 		}
 		bishopMask[i][3] = downRightRay;
+	}
+	for (int i = 0; i < 64; i++) {
 	}
 }
 void generateKnightMoves(moveLists * ml, color c, Tablero * t) {
@@ -1226,15 +1220,17 @@ float boardEval(Tablero * t, color c) {
 	}
 
 	float value =
-	    1 * (__builtin_popcountll(t->piezas[c][peon]) - __builtin_popcountll(t->piezas[!c][peon])) +
-	    3 * ((__builtin_popcountll(t->piezas[c][caballo]) - __builtin_popcountll(t->piezas[!c][caballo])) +
-		 (__builtin_popcountll(t->piezas[c][alfil]) - __builtin_popcountll(t->piezas[!c][alfil]))) +
-	    5 * (__builtin_popcountll(t->piezas[c][torre]) - __builtin_popcountll(t->piezas[!c][torre])) +
-	    9 * (__builtin_popcountll(t->piezas[c][reina]) - __builtin_popcountll(t->piezas[!c][reina])) +
-	    0.1 * (movePerColor[c].count - movePerColor[!c].count);
+	    100 * (__builtin_popcountll(t->piezas[c][peon]) - __builtin_popcountll(t->piezas[!c][peon])) +
+	    300 * (__builtin_popcountll(t->piezas[c][caballo]) - __builtin_popcountll(t->piezas[!c][caballo])) +
+	    350 * (__builtin_popcountll(t->piezas[c][alfil]) - __builtin_popcountll(t->piezas[!c][alfil])) +
+	    500 * (__builtin_popcountll(t->piezas[c][torre]) - __builtin_popcountll(t->piezas[!c][torre])) +
+	    900 * (__builtin_popcountll(t->piezas[c][reina]) - __builtin_popcountll(t->piezas[!c][reina])) +
+	    10 * (movePerColor[c].count - movePerColor[!c].count);
 	value += positional;
-	float scaledValue = tanh(value / 25.0f);
-	return scaledValue;
+	if (debug) {
+		printf("%f\n", value);
+	}
+	return value;
 }
 
 void makeMove(Move * move, Tablero * t, color c) {
@@ -1462,6 +1458,7 @@ void proccesUCICommands(char command[256], Tablero * t) {
 
 			printBitboard(t->allOccupiedSquares);
 		} else if (strcmp(secondCommand, "fen") == 0) {
+			memset(t, 0, sizeof(Tablero));
 			char * fenString = strtok(NULL, " \t\n\r\f\v");
 			printf("DEBUG: fenString = '%s'\n", fenString);
 			int rank = 7;
