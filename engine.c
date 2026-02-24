@@ -1,3 +1,4 @@
+#include <sys/types.h>
 #define _POSIX_C_SOURCE 199309L
 #include <ctype.h>
 #include <math.h>
@@ -103,6 +104,7 @@ typedef struct {
 	casilla enPassantSquare;
 	int halfmoveClock;
 	int fullMoves;
+	uint64_t hash;
 } Tablero;
 const uint8_t WHITE_OO = 1;
 const uint8_t WHITE_OOO = 2;
@@ -139,6 +141,12 @@ typedef struct {
 	int sortingScore;
 	Move move;
 } moveSort;
+typedef struct {
+	uint64_t pieces[2][6][64];
+	uint64_t side;
+	uint64_t castling[4];
+	uint64_t enPassant[8];
+} Zobrist;
 // atack mascs
 bitboard knightAttacks[64];
 bitboard kingAttacks[64];
@@ -153,7 +161,8 @@ bool isPlaying = true;
 color colorToMove;
 bool debug = false;
 Move killerMoves[MAX_DEPTH][2] = {0};
-int history[64][64];
+int history[64][64] = {0};
+Zobrist zobrist;
 goParameters parameters = {
     .wtime = -1,
     .btime = -1,
@@ -250,14 +259,18 @@ static inline void moveToMoveSort(moveLists * input, moveSort output[], int dept
 moveSort scoreMoveForSorting(Move * move, int depth);
 static inline int compareMoveSort(const void * a, const void * b);
 float quiescence(Tablero * t, color c, float alpha, float beta);
+bitboard attackedByColor(Tablero * t, color attacker);
+void initZobrist();
+uint64_t computeZobrist(Zobrist * z, Tablero * t, color sideToMove);
 int main() {
 	initAttackTables();
+	initZobrist();
 	/*
 	Tablero t;
 	initBoard(&t);
 	struct timespec start, end;
 	clock_gettime(CLOCK_MONOTONIC, &start);
-	moveScore best = negaMax(&t, blancas, 1000);
+	moveScore best = negaMaxFixedDepth(&t, blancas, 10);
 	clock_gettime(CLOCK_MONOTONIC, &end);
 	double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
 	printf("info nodes %lld nps %.0f\n", nodes, nodes / elapsed);
@@ -294,7 +307,7 @@ float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta)
 	if (depth == 0 || colorToMove.count == 0) {
 		return quiescence(t, c, alpha, beta);
 	}
-	if (nodes % 4096 == 0) {
+	if (nodes % 131072 == 0) {
 		if (inputAvaliable()) {
 			char buffer[256];
 			if (fgets(buffer, sizeof(buffer), stdin)) {
@@ -332,7 +345,7 @@ moveScore negaMax(Tablero * t, color c, int timeLimit) {
 	if (debug) {
 		printf("DEBUG: negaMax start, colorToMove = %d\n", colorToMove);
 	}
-	memset(&history, 0, sizeof(int));
+	memset(history, 0, sizeof(history));
 	fflush(stdout);
 	moveLists colorToMove = {0};
 	generateAllMoves(c, t, &colorToMove);
@@ -363,7 +376,7 @@ moveScore negaMax(Tablero * t, color c, int timeLimit) {
 		Move localBestMove = bestMove;
 		float localBestScore = bestScore;
 		for (int i = 0; i < colorToMove.count; i++) {
-			if (nodes % 4096 == 0) {
+			if (nodes % 131072 == 0) {
 				if (inputAvaliable()) {
 					char buffer[256];
 					if (fgets(buffer, sizeof(buffer), stdin)) {
@@ -406,7 +419,7 @@ moveScore negaMax(Tablero * t, color c, int timeLimit) {
 moveScore negaMaxFixedDepth(Tablero * t, color c, int depth) {
 	moveLists colorToMove = {0};
 	generateAllMoves(c, t, &colorToMove);
-	memset(&history, 0, sizeof(int));
+	memset(history, 0, sizeof(history));
 
 	if (colorToMove.count == 0) {
 		moveScore output = {.move = {0}, .score = boardEval(t, c)};
@@ -419,6 +432,14 @@ moveScore negaMaxFixedDepth(Tablero * t, color c, int depth) {
 	float beta = INFINITY;
 
 	for (int i = 0; i < colorToMove.count; i++) {
+		if (nodes % 131072 == 0) {
+			if (inputAvaliable()) {
+				char buffer[256];
+				if (fgets(buffer, sizeof(buffer), stdin)) {
+					proccesUCICommands(buffer, t);
+				}
+			}
+		}
 		Tablero temp = *t;
 		makeMove(&colorToMove.moves[i], &temp, c);
 		float score = -recursiveNegaMax(depth - 1, &temp, !c, -beta, -alpha);
@@ -458,6 +479,7 @@ void initBoard(Tablero * t) {
 	t->piezas[negras][reina] = BB_SQUARE(d8);
 	t->piezas[negras][rey] = BB_SQUARE(e8);
 	t->castlingRights = WHITE_OO | WHITE_OOO | BLACK_OO | BLACK_OOO;
+	t->hash = computeZobrist(&zobrist, t, blancas);
 	updateBoardCache(t);
 }
 void updateBoardCache(Tablero * t) {
@@ -477,7 +499,6 @@ void generateAllMoves(color c, Tablero * t, moveLists * output) {
 	generateRookMoves(&temp, c, t);
 	generateBishopMoves(&temp, c, t);
 	generateQueenMoves(&temp, c, t);
-
 	for (int i = 0; i < temp.count; i++) {
 		Tablero tempT = *t;
 		makeMove(&temp.moves[i], &tempT, c);
@@ -748,6 +769,8 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t) {
 			}
 		}
 	}
+
+	bitboard attacked = attackedByColor(t, !c);
 	// castling ROOKS IS HANDLED WHEN MAKING MOVE
 	if (c == blancas && from == e1) {
 		bitboard rooks = t->piezas[c][torre];
@@ -759,15 +782,14 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t) {
 			if (rook == h1 && (t->castlingRights & WHITE_OO)) {
 				for (casilla sq = f1; sq < h1; sq++) {
 					if ((BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c])) ||
-					    isAttacked(t, sq, !c)) {
+					    BB_SQUARE(sq) & attacked) {
 						canCastleKingSide = false;
 					}
 				}
 				if (canCastleKingSide &&
-				    !(isAttacked(t, g1, !c) || isAttacked(t, from,
-									  !c))) { // is the square we are
-					// moving to attacked ||
-					// is the king in check
+				    !(BB_SQUARE(from) & attacked ||
+				      BB_SQUARE(g1) & attacked)) { // is the square we are  moving to attacked || is the
+								   // king in check
 					casilla to = g1;
 					Move move = {from, to, rey, 0, 2, 0};
 					ml->moves[ml->count] = move;
@@ -776,11 +798,11 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t) {
 			} else if (rook == a1 && (t->castlingRights & WHITE_OOO)) {
 				for (casilla sq = d1; sq > a1; sq--) {
 					if ((BB_SQUARE(sq) & (t->allPieces[c] | t->allPieces[!c])) ||
-					    isAttacked(t, sq, !c)) {
+					    BB_SQUARE(sq) & attacked) {
 						canCastleQueenSide = false;
 					}
 				}
-				if (canCastleQueenSide && !(isAttacked(t, c1, !c) || isAttacked(t, from, !c))) {
+				if (canCastleQueenSide && !(BB_SQUARE(c1) & attacked || BB_SQUARE(from) & attacked)) {
 					casilla to = c1;
 					Move move = {from, to, rey, 0, 2, 0};
 					ml->moves[ml->count] = move;
@@ -874,46 +896,30 @@ void generatePawnMoves(moveLists * ml, color c, Tablero * t) {
 				}
 			}
 		}
-		if ((rank == 1) || (rank == 6)) {
-			if (c == blancas && !(t->allOccupiedSquares & BB_SQUARE(from + 8)) &&
-			    !(t->allOccupiedSquares & BB_SQUARE(from + 16))) {
-				to = from + 16;
-				Move move = {from, to, peon, 0, 0, 0};
-				ml->moves[ml->count] = move;
-				ml->count++;
-			} else if (c == negras && !(t->allOccupiedSquares & BB_SQUARE(from - 8)) &&
-				   !(t->allOccupiedSquares & BB_SQUARE(from - 16))) {
-				to = from - 16;
-				Move move = {from, to, peon, 0, 0, 0};
-				ml->moves[ml->count] = move;
-				ml->count++;
+		// White en passant
+		if (rank == 5 && t->enPassantSquare != -1 && c == blancas) {
+			int to1 = from + 7;
+			int to2 = from + 9;
+			if (to1 >= 0 && to1 < 64 && t->enPassantSquare == to1) {
+				Move move = {from, to1, peon, 0, 1, 0};
+				ml->moves[ml->count++] = move;
+			}
+			if (to2 >= 0 && to2 < 64 && t->enPassantSquare == to2) {
+				Move move = {from, to2, peon, 0, 1, 0};
+				ml->moves[ml->count++] = move;
 			}
 		}
-		if (rank == 4 && t->enPassantSquare != 0 && c == blancas) {
-			if (t->enPassantSquare == (from + 7)) { // left
-				to = from + 7;
-				Move move = {from, to, peon, 0, 1, 0};
-				ml->moves[ml->count] = move;
-				ml->count++;
+		// Black en passant
+		else if (rank == 4 && t->enPassantSquare != -1 && c == negras) {
+			int to1 = from - 7;
+			int to2 = from - 9;
+			if (to1 >= 0 && to1 < 64 && t->enPassantSquare == to1) {
+				Move move = {from, to1, peon, 0, 1, 0};
+				ml->moves[ml->count++] = move;
 			}
-			if (t->enPassantSquare == (from + 9)) { // right
-				to = from + 9;
-				Move move = {from, to, peon, 0, 1, 0};
-				ml->moves[ml->count] = move;
-				ml->count++;
-			}
-		} else if (rank == 3 && t->enPassantSquare != 0 && c == negras) {
-			if (t->enPassantSquare == (from - 7)) { // left
-				to = from - 7;
-				Move move = {from, to, peon, 0, 1, 0};
-				ml->moves[ml->count] = move;
-				ml->count++;
-			}
-			if (t->enPassantSquare == (from - 9)) { // right
-				to = from - 9;
-				Move move = {from, to, peon, 0, 1, 0};
-				ml->moves[ml->count] = move;
-				ml->count++;
+			if (to2 >= 0 && to2 < 64 && t->enPassantSquare == to2) {
+				Move move = {from, to2, peon, 0, 1, 0};
+				ml->moves[ml->count++] = move;
 			}
 		}
 	}
@@ -1344,6 +1350,8 @@ void makeMove(Move * move, Tablero * t, color c) {
 		t->piezas[c][move->piece] &= ~(C64(1) << move->from);
 		t->piezas[c][move->piece] |= (C64(1) << move->to);
 		t->piezas[!c][peon] &= ~(C64(1) << opponentPawn);
+		t->allPieces[!c] &= ~(BB_SQUARE(opponentPawn));
+		t->allOccupiedSquares &= ~(BB_SQUARE(opponentPawn));
 		break;
 	case 2:
 		// castling
@@ -1352,34 +1360,53 @@ void makeMove(Move * move, Tablero * t, color c) {
 		switch (move->to) {
 		case g1:
 			if (BB_SQUARE(h1) & t->piezas[c][torre]) {
-				t->piezas[c][torre] &= ~(C64(1) << h1);
-				t->piezas[c][torre] |= (C64(1) << f1);
+				t->piezas[c][torre] &= ~BB_SQUARE(h1);
+				t->piezas[c][torre] |= BB_SQUARE(f1);
 				t->castlingRights &= ~WHITE_OO;
 				t->castlingRights &= ~WHITE_OOO;
+				// move rook
+				t->allPieces[c] &= ~(BB_SQUARE(h1));
+				t->allPieces[c] |= BB_SQUARE(f1);
+				t->allOccupiedSquares &= ~(BB_SQUARE(h1));
+				t->allOccupiedSquares |= BB_SQUARE(f1);
 			}
 			break;
 		case c1:
 			if (BB_SQUARE(a1) & t->piezas[c][torre]) {
-				t->piezas[c][torre] &= ~(C64(1) << a1);
-				t->piezas[c][torre] |= (C64(1) << d1);
+				t->piezas[c][torre] &= ~BB_SQUARE(a1);
+				t->piezas[c][torre] |= BB_SQUARE(d1);
 				t->castlingRights &= ~WHITE_OO;
 				t->castlingRights &= ~WHITE_OOO;
+				t->allOccupiedSquares &= ~(BB_SQUARE(a1));
+				t->allOccupiedSquares |= BB_SQUARE(d1);
+				t->allPieces[c] &= ~(BB_SQUARE(a1));
+				t->allPieces[c] |= BB_SQUARE(d1);
 			}
 			break;
 		case g8:
 			if (BB_SQUARE(h8) & t->piezas[c][torre]) {
-				t->piezas[c][torre] &= ~(C64(1) << h8);
-				t->piezas[c][torre] |= (C64(1) << f8);
+				t->piezas[c][torre] &= ~BB_SQUARE(h8);
+				t->piezas[c][torre] |= BB_SQUARE(f8);
 				t->castlingRights &= ~BLACK_OO;
 				t->castlingRights &= ~BLACK_OOO;
+				t->allPieces[c] &= ~(BB_SQUARE(h8));
+				t->allPieces[c] |= BB_SQUARE(f8);
+
+				t->allOccupiedSquares &= ~(BB_SQUARE(h8));
+				t->allOccupiedSquares |= BB_SQUARE(f8);
 			}
 			break;
 		case c8:
 			if (BB_SQUARE(a8) & t->piezas[c][torre]) {
-				t->piezas[c][torre] &= ~(C64(1) << a8);
-				t->piezas[c][torre] |= (C64(1) << d8);
+				t->piezas[c][torre] &= ~BB_SQUARE(a8);
+				t->piezas[c][torre] |= BB_SQUARE(f8);
+
 				t->castlingRights &= ~BLACK_OO;
 				t->castlingRights &= ~BLACK_OOO;
+				t->allPieces[c] &= ~(BB_SQUARE(a8));
+				t->allPieces[c] |= BB_SQUARE(d8);
+				t->allOccupiedSquares &= ~(BB_SQUARE(a8));
+				t->allOccupiedSquares |= BB_SQUARE(d8);
 			}
 			break;
 		default:
@@ -1395,9 +1422,25 @@ void makeMove(Move * move, Tablero * t, color c) {
 		}
 		t->piezas[c][move->piece] &= ~(C64(1) << move->to);
 		t->piezas[c][move->promoPiece] |= (C64(1) << move->to);
+		// incremental updates
+		t->allPieces[c] &= ~(BB_SQUARE(move->from));
+		t->allPieces[c] |= BB_SQUARE(move->to);
+		t->allOccupiedSquares &= ~(BB_SQUARE(move->from));
+		t->allOccupiedSquares |= BB_SQUARE(move->to);
+		if (move->capture != 0) {
+			t->allPieces[!c] &= ~(BB_SQUARE(move->to));
+		}
 		break;
 	}
-	updateBoardCache(t);
+	if (move->special != 3) {
+		t->allPieces[c] &= ~(BB_SQUARE(move->from));
+		t->allPieces[c] |= BB_SQUARE(move->to);
+		t->allOccupiedSquares &= ~(BB_SQUARE(move->from));
+		t->allOccupiedSquares |= BB_SQUARE(move->to);
+		if (move->capture != 0) {
+			t->allPieces[!c] &= ~(BB_SQUARE(move->to));
+		}
+	}
 }
 bool inputAvaliable() {
 	struct timeval tv = {0, 0};
@@ -1434,15 +1477,15 @@ void proccesUCICommands(char command[256], Tablero * t) {
 		fflush(stdout);
 	}
 
-	else if (strcmp(firstCommand, "debug") == 0) {
+	if (strcmp(firstCommand, "debug") == 0) {
 		char * x = strtok(NULL, " \t\n\r\f\v");
-		if (strcmp(x, "on\n")) {
+		if (strcmp(x, "off") == 0) {
+			printf("ENDING DEBUGING\n");
+			debug = false;
+		} else if (strcmp(x, "on") == 0) {
 			debug = true;
 			printf("DEBUGING\n");
-		} else {
-			debug = false;
 		}
-		return;
 	}
 	if (strcmp(firstCommand, "position") == 0) {
 		if (debug) {
@@ -1467,7 +1510,7 @@ void proccesUCICommands(char command[256], Tablero * t) {
 					casilla to = (stringToSq(move + 2));
 					casilla from = (stringToSq(move));
 					tipoDePieza promo = 0;
-					tipoDePieza piece;
+					tipoDePieza piece = -1;
 					int special = 0;
 					tipoDePieza capture = 0;
 					for (int i = peon; i <= rey; i++) {
@@ -1475,6 +1518,10 @@ void proccesUCICommands(char command[256], Tablero * t) {
 							piece = i;
 							break;
 						}
+					}
+					if (piece == -1) {
+						printf("ERROR: INVALID MOVE\n");
+						exit(256);
 					}
 					if (move[4] != '\0') {
 						promo = charToPiece(move[4]);
@@ -1523,6 +1570,9 @@ void proccesUCICommands(char command[256], Tablero * t) {
 				}
 				if (isdigit(currentChar)) {
 					file += currentChar - '0';
+					if (file > 7) {
+						file = 7;
+					}
 					continue;
 				} else {
 					color c = isupper(currentChar) ? blancas : negras;
@@ -1541,13 +1591,17 @@ void proccesUCICommands(char command[256], Tablero * t) {
 			char * castlingRights = strtok(NULL, " ");
 			if (strchr(castlingRights, '-') != NULL) {
 				t->castlingRights = 0;
-			} else if (strchr(castlingRights, 'K') != NULL) {
+			}
+			if (strchr(castlingRights, 'K') != NULL) {
 				t->castlingRights |= WHITE_OO;
-			} else if (strchr(castlingRights, 'Q') != NULL) {
+			}
+			if (strchr(castlingRights, 'Q') != NULL) {
 				t->castlingRights |= WHITE_OOO;
-			} else if (strchr(castlingRights, 'k') != NULL) {
+			}
+			if (strchr(castlingRights, 'k') != NULL) {
 				t->castlingRights |= BLACK_OO;
-			} else if (strchr(castlingRights, 'q') != NULL) {
+			}
+			if (strchr(castlingRights, 'q') != NULL) {
 				t->castlingRights |= BLACK_OOO;
 			}
 			char * enPassantSquare = strtok(NULL, " ");
@@ -1568,7 +1622,7 @@ void proccesUCICommands(char command[256], Tablero * t) {
 					casilla to = (stringToSq(move + 2));
 					casilla from = (stringToSq(move));
 					tipoDePieza promo = 0;
-					tipoDePieza piece;
+					tipoDePieza piece = -1;
 					int special = 0;
 					tipoDePieza capture = 0;
 					for (int i = peon; i <= rey; i++) {
@@ -1576,6 +1630,10 @@ void proccesUCICommands(char command[256], Tablero * t) {
 							piece = i;
 							break;
 						}
+					}
+					if (piece == -1) {
+						printf("ERROR: INVALID MOVE\n");
+						exit(256);
 					}
 					if (move[4] != '\0') {
 						promo = charToPiece(move[4]);
@@ -1604,6 +1662,8 @@ void proccesUCICommands(char command[256], Tablero * t) {
 					colorToMove = !colorToMove;
 				}
 			}
+
+			t->hash = computeZobrist(&zobrist, t, colorToMove);
 		}
 	} else if (strcmp(firstCommand, "go") == 0 || strcmp(firstCommand, "go\n") == 0) {
 		parameters = (goParameters){
@@ -1720,7 +1780,6 @@ static inline tipoDePieza charToPiece(char c) {
 	case 'K':
 		return rey;
 	}
-	printf("error: invalid fen\n");
 	return 0;
 }
 static inline casilla stringToSq(const char * sq) {
@@ -1777,6 +1836,10 @@ moveSort scoreMoveForSorting(Move * move, int depth) {
 	if (move->capture != 0) {
 		score += 10000 + (sortingValues[move->capture] - sortingValues[move->piece]);
 	} else {
+		if (debug) {
+			printf("DEBUG: from=%d, to=%d piece: %d\n", move->from, move->to, move->piece);
+			fflush(stdout);
+		}
 		score += history[move->from][move->to];
 		if (isEqualMoves(move, &killerMoves[depth][0]) || isEqualMoves(move, &killerMoves[depth][1])) {
 			score += 8000;
@@ -1852,4 +1915,146 @@ float quiescence(Tablero * t, color c, float alpha, float beta) {
 			alpha = score;
 	}
 	return alpha;
+}
+bitboard attackedByColor(Tablero * t, color attacker) {
+	bitboard attacked = 0;
+
+	// Knights
+	bitboard knights = t->piezas[attacker][caballo];
+	while (knights) {
+		int sq = __builtin_ctzll(knights);
+		knights &= knights - 1;
+		attacked |= knightAttacks[sq];
+	}
+
+	// Kings
+	bitboard kings = t->piezas[attacker][rey];
+	while (kings) {
+		int sq = __builtin_ctzll(kings);
+		kings &= kings - 1;
+		attacked |= kingAttacks[sq];
+	}
+
+	// Pawns
+	bitboard pawns = t->piezas[attacker][peon];
+	while (pawns) {
+		int sq = __builtin_ctzll(pawns);
+		pawns &= pawns - 1;
+		attacked |= pawnAttacks[attacker][sq];
+	}
+
+	// Rooks and Queens (orthogonal)
+	bitboard orthPieces = t->piezas[attacker][torre] | t->piezas[attacker][reina];
+	while (orthPieces) {
+		int sq = __builtin_ctzll(orthPieces);
+		orthPieces &= orthPieces - 1;
+		for (int d = 0; d < 4; d++) {
+			bitboard ray = rookMask[sq][d];
+			bitboard blockers = ray & t->allOccupiedSquares;
+			if (blockers) {
+				int firstBlocker;
+				if (d < 2) // north/east (positive)
+					firstBlocker = __builtin_ctzll(blockers);
+				else // south/west (negative)
+					firstBlocker = 63 - __builtin_clzll(blockers);
+
+				// Squares from the piece up to but not including the blocker
+				bitboard before;
+				if (d < 2)
+					before = ray & ((1ULL << firstBlocker) - 1);
+				else
+					before = ray & ~((1ULL << (firstBlocker + 1)) - 1);
+
+				attacked |= before;
+
+				// Include the blocker if it's an enemy piece (since it can be captured)
+				if (BB_SQUARE(firstBlocker) & t->allPieces[!attacker]) {
+					attacked |= BB_SQUARE(firstBlocker);
+				}
+			} else {
+				// No blockers: entire ray is attacked
+				attacked |= ray;
+			}
+		}
+	}
+
+	// Bishops and Queens (diagonal)
+	bitboard diaPieces = t->piezas[attacker][alfil] | t->piezas[attacker][reina];
+	while (diaPieces) {
+		int sq = __builtin_ctzll(diaPieces);
+		diaPieces &= diaPieces - 1;
+		for (int d = 0; d < 4; d++) {
+			bitboard ray = bishopMask[sq][d];
+			bitboard blockers = ray & t->allOccupiedSquares;
+			if (blockers) {
+				int firstBlocker;
+				if (d > 1) // down-left/down-right (positive)
+					firstBlocker = __builtin_ctzll(blockers);
+				else // up-left/up-right (negative)
+					firstBlocker = 63 - __builtin_clzll(blockers);
+
+				bitboard before;
+				if (d > 1)
+					before = ray & ((1ULL << firstBlocker) - 1);
+				else
+					before = ray & ~((1ULL << (firstBlocker + 1)) - 1);
+
+				attacked |= before;
+
+				if (BB_SQUARE(firstBlocker) & t->allPieces[!attacker]) {
+					attacked |= BB_SQUARE(firstBlocker);
+				}
+			} else {
+				attacked |= ray;
+			}
+		}
+	}
+
+	return attacked;
+}
+void initZobrist() {
+	for (int i = 0; i < 2; i++) {
+		for (int j = 0; j < 6; j++) {
+			for (int k = i; k < 64; k++) {
+				zobrist.pieces[i][j][k] = rand();
+			}
+		}
+	}
+	for (int i = 0; i < 4; i++) {
+		zobrist.castling[i] = rand();
+	}
+	for (int i = 0; i < 8; i++) {
+		zobrist.enPassant[i] = rand();
+	}
+}
+uint64_t computeZobrist(Zobrist * z, Tablero * t, color sideToMove) {
+	uint64_t hash = 0;
+	for (int c = 0; c < 2; c++) {
+		for (int p = 0; p <= rey; p++) {
+			bitboard q = t->piezas[c][p];
+			while (q) {
+				int s = __builtin_ctzll(q);
+				q &= q - 1;
+				hash ^= z->pieces[c][p][s];
+			}
+		}
+	}
+	hash ^= (sideToMove == negras ? z->side : 0);
+	if (t->castlingRights & WHITE_OO) {
+		hash ^= z->castling[0];
+	}
+	if (t->castlingRights & WHITE_OOO) {
+		hash ^= z->castling[1];
+	}
+	if (t->castlingRights & BLACK_OO) {
+		hash ^= z->castling[2];
+	}
+	if (t->castlingRights & BLACK_OOO) {
+		hash ^= z->castling[3];
+	}
+	if (t->enPassantSquare != -1) {
+		int file = t->enPassantSquare % 8;
+		hash ^= z->enPassant[file];
+	}
+	return hash;
 }
