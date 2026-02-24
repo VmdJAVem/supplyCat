@@ -153,6 +153,7 @@ bool isPlaying = true;
 color colorToMove;
 bool debug = false;
 Move killerMoves[MAX_DEPTH][2] = {0};
+int history[64][64];
 goParameters parameters = {
     .wtime = -1,
     .btime = -1,
@@ -219,6 +220,7 @@ void printBitboard(bitboard bb);
 void initBoard(Tablero * t);
 void updateBoardCache(Tablero * t);
 void generateAllMoves(color c, Tablero * t, moveLists * output);
+void generateCaptures(color c, Tablero * t, moveLists * output);
 static inline bool isAttacked(Tablero * t, int square, color attackerColor);
 bitboard computeKnightAttacks(casilla sq);
 bitboard computeKingAttacks(casilla sq);
@@ -236,19 +238,30 @@ moveScore negaMax(Tablero * t, color c, int timeLimit);
 float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta);
 void proccesUCICommands(char command[256], Tablero * t);
 bool inputAvaliable();
-tipoDePieza charToPiece(char c);
-casilla stringToSq(const char * sq);
-char pieceToChar(tipoDePieza piece);
-char * moveToStr(Move * move);
+static inline tipoDePieza charToPiece(char c);
+static inline casilla stringToSq(const char * sq);
+static inline char pieceToChar(tipoDePieza piece);
+static inline char * moveToStr(Move * move);
 moveScore negaMaxFixedDepth(Tablero * t, color c, int depth);
-bool isEqualMoves(Move * x, Move * y);
-int partition(moveSort arr[], int low, int high);
-void swapMoveSort(moveSort * a, moveSort * b);
-void moveToMoveSort(moveLists * input, moveSort output[], int depth);
+static inline bool isEqualMoves(Move * x, Move * y);
+static inline int partition(moveSort arr[], int low, int high);
+static inline void swapMoveSort(moveSort * a, moveSort * b);
+static inline void moveToMoveSort(moveLists * input, moveSort output[], int depth);
 moveSort scoreMoveForSorting(Move * move, int depth);
-int compareMoveSort(const void * a, const void * b);
+static inline int compareMoveSort(const void * a, const void * b);
+float quiescence(Tablero * t, color c, float alpha, float beta);
 int main() {
 	initAttackTables();
+	/*
+	Tablero t;
+	initBoard(&t);
+	struct timespec start, end;
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	moveScore best = negaMax(&t, blancas, 1000);
+	clock_gettime(CLOCK_MONOTONIC, &end);
+	double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+	printf("info nodes %lld nps %.0f\n", nodes, nodes / elapsed);
+	*/
 	while (true) {
 		if (inputAvaliable()) {
 			char buffer[256];
@@ -279,9 +292,9 @@ float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta)
 	moveLists colorToMove = {0};
 	generateAllMoves(c, t, &colorToMove);
 	if (depth == 0 || colorToMove.count == 0) {
-		return boardEval(t, c);
+		return quiescence(t, c, alpha, beta);
 	}
-	if (nodes % 8192 == 0) {
+	if (nodes % 4096 == 0) {
 		if (inputAvaliable()) {
 			char buffer[256];
 			if (fgets(buffer, sizeof(buffer), stdin)) {
@@ -302,6 +315,7 @@ float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta)
 		}
 		if (alpha >= beta) {
 			if (moves[i].move.capture == 0 && moves[i].move.capture != 3) {
+				history[moves[i].move.from][moves[i].move.to] += depth * depth;
 				if (isEqualMoves(&move, &killerMoves[depth][0])) {
 					continue;
 				} else {
@@ -318,6 +332,7 @@ moveScore negaMax(Tablero * t, color c, int timeLimit) {
 	if (debug) {
 		printf("DEBUG: negaMax start, colorToMove = %d\n", colorToMove);
 	}
+	memset(&history, 0, sizeof(int));
 	fflush(stdout);
 	moveLists colorToMove = {0};
 	generateAllMoves(c, t, &colorToMove);
@@ -348,7 +363,7 @@ moveScore negaMax(Tablero * t, color c, int timeLimit) {
 		Move localBestMove = bestMove;
 		float localBestScore = bestScore;
 		for (int i = 0; i < colorToMove.count; i++) {
-			if (nodes % 8192 == 0) {
+			if (nodes % 4096 == 0) {
 				if (inputAvaliable()) {
 					char buffer[256];
 					if (fgets(buffer, sizeof(buffer), stdin)) {
@@ -383,12 +398,15 @@ moveScore negaMax(Tablero * t, color c, int timeLimit) {
 		}
 	}
 	moveScore bm = {.move = bestMove, .score = bestScore};
-	printf("%lld nodes searched\n", nodes);
+	if (debug) {
+		printf("%lld nodes searched\n", nodes);
+	}
 	return bm;
 }
 moveScore negaMaxFixedDepth(Tablero * t, color c, int depth) {
 	moveLists colorToMove = {0};
 	generateAllMoves(c, t, &colorToMove);
+	memset(&history, 0, sizeof(int));
 
 	if (colorToMove.count == 0) {
 		moveScore output = {.move = {0}, .score = boardEval(t, c)};
@@ -413,7 +431,9 @@ moveScore negaMaxFixedDepth(Tablero * t, color c, int depth) {
 	}
 
 	moveScore result = {.move = bestMove, .score = bestScore};
-	printf("%lld nodes searched\n", nodes);
+	if (debug) {
+		printf("%lld nodes searched\n", nodes);
+	}
 	return result;
 }
 void initBoard(Tablero * t) {
@@ -457,6 +477,7 @@ void generateAllMoves(color c, Tablero * t, moveLists * output) {
 	generateRookMoves(&temp, c, t);
 	generateBishopMoves(&temp, c, t);
 	generateQueenMoves(&temp, c, t);
+
 	for (int i = 0; i < temp.count; i++) {
 		Tablero tempT = *t;
 		makeMove(&temp.moves[i], &tempT, c);
@@ -464,6 +485,27 @@ void generateAllMoves(color c, Tablero * t, moveLists * output) {
 		if (!isAttacked(&tempT, king, !c)) {
 			output->moves[output->count] = temp.moves[i];
 			output->count++;
+		}
+	}
+}
+void generateCaptures(color c, Tablero * t, moveLists * output) {
+	output->count = 0;
+	moveLists temp = {0};
+	generateKingMoves(&temp, c, t);
+	generateKnightMoves(&temp, c, t);
+	generatePawnMoves(&temp, c, t);
+	generateRookMoves(&temp, c, t);
+	generateBishopMoves(&temp, c, t);
+	generateQueenMoves(&temp, c, t);
+	for (int i = 0; i < temp.count; i++) {
+		if (temp.moves[i].capture != 0) {
+			Tablero tempT = *t;
+			makeMove(&temp.moves[i], &tempT, c);
+			casilla king = __builtin_ctzll(tempT.piezas[c][rey]);
+			if (!isAttacked(&tempT, king, !c)) {
+				output->moves[output->count] = temp.moves[i];
+				output->count++;
+			}
 		}
 	}
 }
@@ -695,15 +737,11 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t) {
 			int capture = 0;
 			if (BB_SQUARE(i) & t->allPieces[!c]) {
 				for (int piece = peon; piece <= rey; piece++) {
-					if (t->piezas[!c][piece] & BB_SQUARE(i) && !(isAttacked(t, i, !c))) {
+					if (t->piezas[!c][piece] & BB_SQUARE(i)) {
 						capture = piece;
 						break;
 					}
 				}
-				Move move = {from, i, rey, capture, 0, 0};
-				ml->moves[ml->count] = move;
-				ml->count++;
-			} else if (!(isAttacked(t, i, !c))) {
 				Move move = {from, i, rey, capture, 0, 0};
 				ml->moves[ml->count] = move;
 				ml->count++;
@@ -1385,9 +1423,6 @@ void proccesUCICommands(char command[256], Tablero * t) {
 	} else if (strcmp(command, "isready\n") == 0) {
 		printf("readyok\n");
 		return;
-	} else if (strcmp(command, "debug\n") == 0) {
-		debug = !debug;
-		return;
 	}
 	if (debug) {
 		printf("DEBUG: full command = '%s'\n", command);
@@ -1398,8 +1433,21 @@ void proccesUCICommands(char command[256], Tablero * t) {
 		printf("DEBUG: firstCommand = '%s'\n", firstCommand);
 		fflush(stdout);
 	}
+
+	else if (strcmp(firstCommand, "debug") == 0) {
+		char * x = strtok(NULL, " \t\n\r\f\v");
+		if (strcmp(x, "on\n")) {
+			debug = true;
+			printf("DEBUGING\n");
+		} else {
+			debug = false;
+		}
+		return;
+	}
 	if (strcmp(firstCommand, "position") == 0) {
-		printBitboard(t->allOccupiedSquares);
+		if (debug) {
+			printBitboard(t->allOccupiedSquares);
+		}
 		char * secondCommand = strtok(NULL, " \t\n\r\f\v");
 		if (debug) {
 			printf("DEBUG: secondCommand = '%s'\n", secondCommand);
@@ -1455,12 +1503,15 @@ void proccesUCICommands(char command[256], Tablero * t) {
 					colorToMove = !colorToMove;
 				}
 			}
-
-			printBitboard(t->allOccupiedSquares);
+			if (debug) {
+				printBitboard(t->allOccupiedSquares);
+			}
 		} else if (strcmp(secondCommand, "fen") == 0) {
 			memset(t, 0, sizeof(Tablero));
 			char * fenString = strtok(NULL, " \t\n\r\f\v");
-			printf("DEBUG: fenString = '%s'\n", fenString);
+			if (debug) {
+				printf("DEBUG: fenString = '%s'\n", fenString);
+			}
 			int rank = 7;
 			int file = 0;
 			for (int i = 0; fenString[i] != '\0'; i++) {
@@ -1479,7 +1530,9 @@ void proccesUCICommands(char command[256], Tablero * t) {
 					casilla square = rank * 8 + file;
 					t->piezas[c][piece] |= BB_SQUARE(square);
 					file++;
-					printf("Placing %c at square %d\n", currentChar, square);
+					if (debug) {
+						printf("Placing %c at square %d\n", currentChar, square);
+					}
 				}
 			}
 			updateBoardCache(t);
@@ -1646,7 +1699,7 @@ void proccesUCICommands(char command[256], Tablero * t) {
 		}
 	}
 }
-tipoDePieza charToPiece(char c) {
+static inline tipoDePieza charToPiece(char c) {
 	switch (c) {
 	case 'p':
 	case 'P':
@@ -1670,12 +1723,12 @@ tipoDePieza charToPiece(char c) {
 	printf("error: invalid fen\n");
 	return 0;
 }
-casilla stringToSq(const char * sq) {
+static inline casilla stringToSq(const char * sq) {
 	int file = tolower(sq[0]) - 'a';
 	int rank = sq[1] - '1';
 	return rank * 8 + file;
 }
-char pieceToChar(tipoDePieza piece) {
+static inline char pieceToChar(tipoDePieza piece) {
 	switch (piece) {
 	case peon:
 		return 'p';
@@ -1692,7 +1745,7 @@ char pieceToChar(tipoDePieza piece) {
 	}
 	printf("error: invalid fen\n");
 }
-char * moveToStr(Move * move) {
+static inline char * moveToStr(Move * move) {
 	static char result[6];
 	int fromFile = move->from % 8;
 	int fromRank = move->from / 8;
@@ -1712,7 +1765,7 @@ char * moveToStr(Move * move) {
 	}
 	return result;
 }
-bool isEqualMoves(Move * x, Move * y) {
+static inline bool isEqualMoves(Move * x, Move * y) {
 	if ((x->to == y->to) && (x->from == y->from) && (x->piece == y->piece) && (x->promoPiece == y->promoPiece)) {
 		return true;
 	} else {
@@ -1724,6 +1777,7 @@ moveSort scoreMoveForSorting(Move * move, int depth) {
 	if (move->capture != 0) {
 		score += 10000 + (sortingValues[move->capture] - sortingValues[move->piece]);
 	} else {
+		score += history[move->from][move->to];
 		if (isEqualMoves(move, &killerMoves[depth][0]) || isEqualMoves(move, &killerMoves[depth][1])) {
 			score += 8000;
 		}
@@ -1734,17 +1788,17 @@ moveSort scoreMoveForSorting(Move * move, int depth) {
 	moveSort x = {score, *move};
 	return x;
 }
-void moveToMoveSort(moveLists * input, moveSort output[], int depth) {
+static inline void moveToMoveSort(moveLists * input, moveSort output[], int depth) {
 	for (int i = 0; i < input->count; i++) {
 		output[i] = scoreMoveForSorting(&input->moves[i], depth);
 	}
 }
-void swapMoveSort(moveSort * a, moveSort * b) {
+static inline void swapMoveSort(moveSort * a, moveSort * b) {
 	moveSort temp = *a;
 	*a = *b;
 	*b = temp;
 }
-int partition(moveSort arr[], int low, int high) {
+static inline int partition(moveSort arr[], int low, int high) {
 
 	// Choose the pivot
 	int pivot = arr[high].sortingScore;
@@ -1768,9 +1822,34 @@ int partition(moveSort arr[], int low, int high) {
 	swapMoveSort(&arr[i + 1], &arr[high]);
 	return i + 1;
 }
-int compareMoveSort(const void * a, const void * b) {
+static inline int compareMoveSort(const void * a, const void * b) {
 	const moveSort * ma = (const moveSort *)a;
 	const moveSort * mb = (const moveSort *)b;
 	// Descending order: higher score first
 	return mb->sortingScore - ma->sortingScore;
+}
+float quiescence(Tablero * t, color c, float alpha, float beta) {
+	float standPat = boardEval(t, c); // current evaluation
+	if (standPat >= beta) {
+		return beta;
+	}
+	if (standPat > alpha) {
+		alpha = standPat;
+	}
+	moveLists captures = {0};
+	generateCaptures(c, t, &captures);
+	moveSort moves[256];
+	moveToMoveSort(&captures, moves, 0);
+	qsort(moves, captures.count, sizeof(moveSort), compareMoveSort);
+
+	for (int i = 0; i < captures.count; i++) {
+		Tablero temp = *t;
+		makeMove(&captures.moves[i], &temp, c);
+		float score = -quiescence(&temp, !c, -beta, -alpha);
+		if (score >= beta)
+			return beta;
+		if (score > alpha)
+			alpha = score;
+	}
+	return alpha;
 }
