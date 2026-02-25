@@ -1293,7 +1293,15 @@ float boardEval(Tablero * t, color c) {
 }
 void makeMove(Move * move, Tablero * t, color c) {
 	casilla enPassantSq = t->enPassantSquare;
+	uint8_t oldCastling = t->castlingRights; // Save before changes
+
+	// XOR out old en passant square (if any)
+	if (t->enPassantSquare != -1) {
+		int file = t->enPassantSquare % 8;
+		t->hash ^= zobrist.enPassant[file];
+	}
 	t->enPassantSquare = -1;
+
 	t->fullMoves++;
 	if (move->piece == peon)
 		t->halfmoveClock = 0;
@@ -1322,35 +1330,60 @@ void makeMove(Move * move, Tablero * t, color c) {
 		t->allOccupiedSquares |= BB_SQUARE(move->to);
 		t->hash ^= zobrist.pieces[c][move->piece][move->to];
 
-		// Update castling rights if king moves
+		// Update castling rights based on old rights
+		// King move
 		if (move->piece == rey) {
 			if (c == blancas) {
+				if (oldCastling & WHITE_OO)
+					t->hash ^= zobrist.castling[0];
+				if (oldCastling & WHITE_OOO)
+					t->hash ^= zobrist.castling[1];
 				t->castlingRights &= ~(WHITE_OO | WHITE_OOO);
 			} else {
+				if (oldCastling & BLACK_OO)
+					t->hash ^= zobrist.castling[2];
+				if (oldCastling & BLACK_OOO)
+					t->hash ^= zobrist.castling[3];
 				t->castlingRights &= ~(BLACK_OO | BLACK_OOO);
 			}
 		}
-		// Update castling rights if a rook moves from its original square
-		if (move->piece == torre) {
-			if (move->from == h1)
+		// Rook move from original square
+		else if (move->piece == torre) {
+			if (move->from == h1 && (oldCastling & WHITE_OO)) {
+				t->hash ^= zobrist.castling[0];
 				t->castlingRights &= ~WHITE_OO;
-			if (move->from == a1)
+			}
+			if (move->from == a1 && (oldCastling & WHITE_OOO)) {
+				t->hash ^= zobrist.castling[1];
 				t->castlingRights &= ~WHITE_OOO;
-			if (move->from == h8)
+			}
+			if (move->from == h8 && (oldCastling & BLACK_OO)) {
+				t->hash ^= zobrist.castling[2];
 				t->castlingRights &= ~BLACK_OO;
-			if (move->from == a8)
+			}
+			if (move->from == a8 && (oldCastling & BLACK_OOO)) {
+				t->hash ^= zobrist.castling[3];
 				t->castlingRights &= ~BLACK_OOO;
+			}
 		}
-		// Update castling rights if a rook is captured
+		// Rook capture
 		if (move->capture == torre) {
-			if (move->to == h1)
+			if (move->to == h1 && (oldCastling & WHITE_OO)) {
+				t->hash ^= zobrist.castling[0];
 				t->castlingRights &= ~WHITE_OO;
-			if (move->to == a1)
+			}
+			if (move->to == a1 && (oldCastling & WHITE_OOO)) {
+				t->hash ^= zobrist.castling[1];
 				t->castlingRights &= ~WHITE_OOO;
-			if (move->to == h8)
+			}
+			if (move->to == h8 && (oldCastling & BLACK_OO)) {
+				t->hash ^= zobrist.castling[2];
 				t->castlingRights &= ~BLACK_OO;
-			if (move->to == a8)
+			}
+			if (move->to == a8 && (oldCastling & BLACK_OOO)) {
+				t->hash ^= zobrist.castling[3];
 				t->castlingRights &= ~BLACK_OOO;
+			}
 		}
 
 		// Set en passant square if double pawn push
@@ -1359,6 +1392,9 @@ void makeMove(Move * move, Tablero * t, color c) {
 				t->enPassantSquare = move->to - 8;
 			else
 				t->enPassantSquare = move->to + 8;
+			// XOR in new en passant file
+			int file = t->enPassantSquare % 8;
+			t->hash ^= zobrist.enPassant[file];
 		}
 		break;
 	}
@@ -1388,6 +1424,7 @@ void makeMove(Move * move, Tablero * t, color c) {
 		t->allOccupiedSquares |= BB_SQUARE(move->to);
 		t->hash ^= zobrist.pieces[c][move->piece][move->to];
 
+		// No castling changes, no en passant setting (already cleared)
 		break;
 	}
 
@@ -1428,10 +1465,18 @@ void makeMove(Move * move, Tablero * t, color c) {
 		t->hash ^= zobrist.pieces[c][torre][rookFrom];
 		t->hash ^= zobrist.pieces[c][torre][rookTo];
 
-		// Remove castling rights for the moving side
+		// Update castling rights based on old rights
 		if (c == blancas) {
+			if (oldCastling & WHITE_OO)
+				t->hash ^= zobrist.castling[0];
+			if (oldCastling & WHITE_OOO)
+				t->hash ^= zobrist.castling[1];
 			t->castlingRights &= ~(WHITE_OO | WHITE_OOO);
 		} else {
+			if (oldCastling & BLACK_OO)
+				t->hash ^= zobrist.castling[2];
+			if (oldCastling & BLACK_OOO)
+				t->hash ^= zobrist.castling[3];
 			t->castlingRights &= ~(BLACK_OO | BLACK_OOO);
 		}
 		break;
@@ -1458,6 +1503,7 @@ void makeMove(Move * move, Tablero * t, color c) {
 		t->allOccupiedSquares |= BB_SQUARE(move->to);
 		t->hash ^= zobrist.pieces[c][move->promoPiece][move->to];
 
+		// No castling changes
 		break;
 	}
 	}
