@@ -21,6 +21,7 @@ typedef uint64_t bitboard;
 typedef enum { blancas, negras } color;
 typedef enum { peon, caballo, alfil, torre, reina, rey } tipoDePieza;
 int sortingValues[6] = {100, 300, 350, 500, 900};
+
 // clangd_format off
 typedef enum {
 	// Rank 1
@@ -119,6 +120,18 @@ typedef struct {
 	int special;	// 0 normal, 1 en passant, 2 castling, 3 promo,
 	int promoPiece; // 0 none
 } Move;
+#define TT_SIZE (1 << 20)
+#define TT_MASK (TT_SIZE - 1)
+
+typedef struct {
+	uint64_t key;  // full Zobrist hash to verify entry
+	int depth;     // remaining depth at which this position was searched
+	float score;   // evaluation (from perspective of side to move)
+	uint8_t flag;  // 0 = exact, 1 = lower bound (beta cutoff), 2 = upper bound (fail low)
+	Move bestMove; // optional, for move ordering
+} TTEntry;
+
+TTEntry tt[TT_SIZE];
 typedef struct {
 	Move moves[256];
 	int count;
@@ -298,6 +311,19 @@ void printBitboard(bitboard bb) {
 	printf("  a b c d e f g h\n\n");
 }
 float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta) {
+	int index = t->hash & TT_MASK;
+	TTEntry * entry = &tt[index];
+	if (entry->key == t->hash && entry->depth >= depth) {
+		// We have a stored result from at least this depth
+		if (entry->flag == 0)
+			return entry->score; // exact score
+		if (entry->flag == 1 && entry->score >= beta)
+			return beta; // lower bound cutoff
+		if (entry->flag == 2 && entry->score <= alpha)
+			return alpha; // upper bound cutoff
+		// Otherwise, we can't use the score directly, but we might still use the best move for ordering
+	}
+	float oldAlpha = alpha;
 	nodes++;
 	if (debug) {
 		printf("DEBUG: recursiveNegaMax start, colorToMove = %d\n", c);
@@ -341,9 +367,26 @@ float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta)
 			break;
 		}
 	}
+	uint8_t flag;
+	if (alpha <= oldAlpha)
+		flag = 2; // fail low – upper bound
+	else if (alpha >= beta)
+		flag = 1; // fail high – lower bound
+	else
+		flag = 0; // exact
+
+	// Replace if deeper or slot is empty
+	if (entry->depth <= depth || entry->key == 0) {
+		entry->key = t->hash;
+		entry->depth = depth;
+		entry->score = alpha;
+		entry->flag = flag;
+		entry->bestMove = bestMove; // if you have it – you may not have bestMove in recursive nodes
+	}
 	return alpha;
 }
 moveScore negaMax(Tablero * t, color c, int timeLimit) {
+	memset(tt, 0, sizeof(tt));
 	if (debug) {
 		printf("DEBUG: negaMax start, colorToMove = %d\n", colorToMove);
 	}
@@ -419,6 +462,7 @@ moveScore negaMax(Tablero * t, color c, int timeLimit) {
 	return bm;
 }
 moveScore negaMaxFixedDepth(Tablero * t, color c, int depth) {
+	memset(tt, 0, sizeof(tt));
 	moveLists colorToMove = {0};
 	generateAllMoves(c, t, &colorToMove);
 	memset(history, 0, sizeof(history));
