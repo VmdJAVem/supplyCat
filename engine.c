@@ -1,4 +1,3 @@
-#include <sys/types.h>
 #define _POSIX_C_SOURCE 199309L
 #include <ctype.h>
 #include <math.h>
@@ -8,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/select.h>
+#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 typedef uint64_t bitboard;
@@ -791,7 +791,7 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t) {
 				      BB_SQUARE(g1) & attacked)) { // is the square we are  moving to attacked || is the
 								   // king in check
 					casilla to = g1;
-					Move move = {from, to, rey, 0, 2, 0};
+					Move move = {from, to, rey, -1, 2, 0};
 					ml->moves[ml->count] = move;
 					ml->count++;
 				}
@@ -804,7 +804,7 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t) {
 				}
 				if (canCastleQueenSide && !(BB_SQUARE(c1) & attacked || BB_SQUARE(from) & attacked)) {
 					casilla to = c1;
-					Move move = {from, to, rey, 0, 2, 0};
+					Move move = {from, to, rey, -1, 2, 0};
 					ml->moves[ml->count] = move;
 					ml->count++;
 				}
@@ -828,7 +828,7 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t) {
 
 				if (canCastleKingSide && !(isAttacked(t, from, !c) || isAttacked(t, g8, !c))) {
 					casilla to = g8;
-					Move move = {from, to, rey, 0, 2, 0};
+					Move move = {from, to, rey, -1, 2, 0};
 					ml->moves[ml->count] = move;
 					ml->count++;
 				}
@@ -841,7 +841,7 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t) {
 				}
 				if (canCastleQueenSide && !(isAttacked(t, from, !c) || isAttacked(t, c8, !c))) {
 					casilla to = c8;
-					Move move = {from, to, rey, 0, 2, 0};
+					Move move = {from, to, rey, -1, 2, 0};
 					ml->moves[ml->count] = move;
 					ml->count++;
 				}
@@ -864,17 +864,30 @@ void generatePawnMoves(moveLists * ml, color c, Tablero * t) {
 		}
 		if (to < 64 && to >= 0) {
 			if (BB_SQUARE(to) & (~t->allOccupiedSquares)) {
-				if ((to / 8 == 1 && c == negras) || (to / 8 == 6 && c == blancas)) {
+				if ((to / 8 == 0 && c == negras) || (to / 8 == 7 && c == blancas)) {
 					for (int i = caballo; i < rey; i++) {
-						Move move = {from, to, peon, 3, i};
+						Move move = {from, to, peon, -1, 3, i};
 						ml->moves[ml->count] = move;
 						ml->count++;
 					}
 				} else {
-					Move move = {from, to, peon, 0, 0, 0};
+					Move move = {from, to, peon, -1, 0, 0};
 					ml->moves[ml->count] = move;
 					ml->count++;
 				}
+			}
+		}
+		if (c == blancas && rank == 1) {
+			if (!(t->allOccupiedSquares & BB_SQUARE(from + 8)) &&
+			    !(t->allOccupiedSquares & BB_SQUARE(from + 16))) {
+				Move move = {from, from + 16, peon, -1, 0, 0};
+				ml->moves[ml->count++] = move;
+			}
+		} else if (c == negras && rank == 6) {
+			if (!(t->allOccupiedSquares & BB_SQUARE(from - 8)) &&
+			    !(t->allOccupiedSquares & BB_SQUARE(from - 16))) {
+				Move move = {from, from - 16, peon, -1, 0, 0};
+				ml->moves[ml->count++] = move;
 			}
 		}
 		if (pawnAttacksLocal & t->allPieces[!c]) {
@@ -897,7 +910,7 @@ void generatePawnMoves(moveLists * ml, color c, Tablero * t) {
 			}
 		}
 		// White en passant
-		if (rank == 5 && t->enPassantSquare != -1 && c == blancas) {
+		if (rank == 4 && t->enPassantSquare != -1 && c == blancas) {
 			int to1 = from + 7;
 			int to2 = from + 9;
 			if (to1 >= 0 && to1 < 64 && t->enPassantSquare == to1) {
@@ -910,7 +923,7 @@ void generatePawnMoves(moveLists * ml, color c, Tablero * t) {
 			}
 		}
 		// Black en passant
-		else if (rank == 4 && t->enPassantSquare != -1 && c == negras) {
+		else if (rank == 3 && t->enPassantSquare != -1 && c == negras) {
 			int to1 = from - 7;
 			int to2 = from - 9;
 			if (to1 >= 0 && to1 < 64 && t->enPassantSquare == to1) {
@@ -1276,165 +1289,179 @@ float boardEval(Tablero * t, color c) {
 	}
 	return value;
 }
-
 void makeMove(Move * move, Tablero * t, color c) {
 	casilla enPassantSq = t->enPassantSquare;
 	t->enPassantSquare = -1;
 	t->fullMoves++;
-	if (move->piece == peon) {
+	if (move->piece == peon)
 		t->halfmoveClock = 0;
-	}
+	else
+		t->halfmoveClock++;
+
 	switch (move->special) {
-	case 0:
+	case 0: {
+		// Remove moving piece from old square
+		t->piezas[c][move->piece] &= ~(C64(1) << move->from);
+		t->allPieces[c] &= ~(BB_SQUARE(move->from));
+		t->allOccupiedSquares &= ~(BB_SQUARE(move->from));
+		t->hash ^= zobrist.pieces[c][move->piece][move->from];
+
+		// Handle capture
 		if (move->capture != -1) {
 			t->piezas[!c][move->capture] &= ~(C64(1) << move->to);
+			t->allPieces[!c] &= ~(BB_SQUARE(move->to));
+			t->allOccupiedSquares &= ~(BB_SQUARE(move->to));
+			t->hash ^= zobrist.pieces[!c][move->capture][move->to];
 		}
-		t->piezas[c][move->piece] &= ~(C64(1) << move->from);
-		t->piezas[c][move->piece] |= (C64(1) << move->to);
-		if (c == blancas && move->piece == rey) {
-			t->castlingRights &= ~WHITE_OO;
-			t->castlingRights &= ~WHITE_OOO;
 
-		} else if (c == negras && move->piece == rey) {
-			t->castlingRights &= ~BLACK_OO;
-			t->castlingRights &= ~BLACK_OOO;
-		}
-		if (move->capture == torre) {
-			switch (move->to) {
-			case h1:
-				t->castlingRights &= ~WHITE_OO;
-				break;
-			case a1:
-				t->castlingRights &= ~WHITE_OOO;
-				break;
-			case h8:
-				t->castlingRights &= ~BLACK_OO;
-				break;
-			case a8:
-				t->castlingRights &= ~BLACK_OOO;
-				break;
-			default:
-				break;
-			}
-		}
-		if (move->piece == torre) {
-			casilla from = move->from;
-			switch (from) {
-			case h1:
-				t->castlingRights &= ~WHITE_OO;
-				break;
-			case a1:
-				t->castlingRights &= ~WHITE_OOO;
-				break;
-			case h8:
-				t->castlingRights &= ~BLACK_OO;
-				break;
-			case a8:
-				t->castlingRights &= ~BLACK_OOO;
-				break;
-			default:
-				break;
-			}
-		}
-		if (move->piece == peon && (abs(move->to - move->from) == 16)) {
+		// Add moving piece to new square
+		t->piezas[c][move->piece] |= (C64(1) << move->to);
+		t->allPieces[c] |= BB_SQUARE(move->to);
+		t->allOccupiedSquares |= BB_SQUARE(move->to);
+		t->hash ^= zobrist.pieces[c][move->piece][move->to];
+
+		// Update castling rights if king moves
+		if (move->piece == rey) {
 			if (c == blancas) {
+				t->castlingRights &= ~(WHITE_OO | WHITE_OOO);
+			} else {
+				t->castlingRights &= ~(BLACK_OO | BLACK_OOO);
+			}
+		}
+		// Update castling rights if a rook moves from its original square
+		if (move->piece == torre) {
+			if (move->from == h1)
+				t->castlingRights &= ~WHITE_OO;
+			if (move->from == a1)
+				t->castlingRights &= ~WHITE_OOO;
+			if (move->from == h8)
+				t->castlingRights &= ~BLACK_OO;
+			if (move->from == a8)
+				t->castlingRights &= ~BLACK_OOO;
+		}
+		// Update castling rights if a rook is captured
+		if (move->capture == torre) {
+			if (move->to == h1)
+				t->castlingRights &= ~WHITE_OO;
+			if (move->to == a1)
+				t->castlingRights &= ~WHITE_OOO;
+			if (move->to == h8)
+				t->castlingRights &= ~BLACK_OO;
+			if (move->to == a8)
+				t->castlingRights &= ~BLACK_OOO;
+		}
+
+		// Set en passant square if double pawn push
+		if (move->piece == peon && abs(move->to - move->from) == 16) {
+			if (c == blancas)
 				t->enPassantSquare = move->to - 8;
-			}
-			if (c == negras) {
+			else
 				t->enPassantSquare = move->to + 8;
-			}
 		}
 		break;
-	case 1:
+	}
+
+	case 1: {
+		if (enPassantSq == -1) {
+			fprintf(stderr, "Error: en passant move with no target square\n");
+			return;
+		}
 		casilla opponentPawn = (c == blancas ? enPassantSq - 8 : enPassantSq + 8);
+
+		// Remove capturing pawn from old square
 		t->piezas[c][move->piece] &= ~(C64(1) << move->from);
-		t->piezas[c][move->piece] |= (C64(1) << move->to);
+		t->allPieces[c] &= ~(BB_SQUARE(move->from));
+		t->allOccupiedSquares &= ~(BB_SQUARE(move->from));
+		t->hash ^= zobrist.pieces[c][move->piece][move->from];
+
+		// Remove captured pawn
 		t->piezas[!c][peon] &= ~(C64(1) << opponentPawn);
 		t->allPieces[!c] &= ~(BB_SQUARE(opponentPawn));
 		t->allOccupiedSquares &= ~(BB_SQUARE(opponentPawn));
-		break;
-	case 2:
-		// castling
-		t->piezas[c][move->piece] &= ~(C64(1) << move->from);
+		t->hash ^= zobrist.pieces[!c][peon][opponentPawn];
+
+		// Add capturing pawn to new square
 		t->piezas[c][move->piece] |= (C64(1) << move->to);
-		switch (move->to) {
-		case g1:
-			if (BB_SQUARE(h1) & t->piezas[c][torre]) {
-				t->piezas[c][torre] &= ~BB_SQUARE(h1);
-				t->piezas[c][torre] |= BB_SQUARE(f1);
-				t->castlingRights &= ~WHITE_OO;
-				t->castlingRights &= ~WHITE_OOO;
-				// move rook
-				t->allPieces[c] &= ~(BB_SQUARE(h1));
-				t->allPieces[c] |= BB_SQUARE(f1);
-				t->allOccupiedSquares &= ~(BB_SQUARE(h1));
-				t->allOccupiedSquares |= BB_SQUARE(f1);
-			}
-			break;
-		case c1:
-			if (BB_SQUARE(a1) & t->piezas[c][torre]) {
-				t->piezas[c][torre] &= ~BB_SQUARE(a1);
-				t->piezas[c][torre] |= BB_SQUARE(d1);
-				t->castlingRights &= ~WHITE_OO;
-				t->castlingRights &= ~WHITE_OOO;
-				t->allOccupiedSquares &= ~(BB_SQUARE(a1));
-				t->allOccupiedSquares |= BB_SQUARE(d1);
-				t->allPieces[c] &= ~(BB_SQUARE(a1));
-				t->allPieces[c] |= BB_SQUARE(d1);
-			}
-			break;
-		case g8:
-			if (BB_SQUARE(h8) & t->piezas[c][torre]) {
-				t->piezas[c][torre] &= ~BB_SQUARE(h8);
-				t->piezas[c][torre] |= BB_SQUARE(f8);
-				t->castlingRights &= ~BLACK_OO;
-				t->castlingRights &= ~BLACK_OOO;
-				t->allPieces[c] &= ~(BB_SQUARE(h8));
-				t->allPieces[c] |= BB_SQUARE(f8);
+		t->allPieces[c] |= BB_SQUARE(move->to);
+		t->allOccupiedSquares |= BB_SQUARE(move->to);
+		t->hash ^= zobrist.pieces[c][move->piece][move->to];
 
-				t->allOccupiedSquares &= ~(BB_SQUARE(h8));
-				t->allOccupiedSquares |= BB_SQUARE(f8);
-			}
-			break;
-		case c8:
-			if (BB_SQUARE(a8) & t->piezas[c][torre]) {
-				t->piezas[c][torre] &= ~BB_SQUARE(a8);
-				t->piezas[c][torre] |= BB_SQUARE(f8);
+		break;
+	}
 
-				t->castlingRights &= ~BLACK_OO;
-				t->castlingRights &= ~BLACK_OOO;
-				t->allPieces[c] &= ~(BB_SQUARE(a8));
-				t->allPieces[c] |= BB_SQUARE(d8);
-				t->allOccupiedSquares &= ~(BB_SQUARE(a8));
-				t->allOccupiedSquares |= BB_SQUARE(d8);
-			}
+	case 2: {
+		// Move king
+		t->piezas[c][rey] &= ~(C64(1) << move->from);
+		t->piezas[c][rey] |= (C64(1) << move->to);
+		t->allPieces[c] &= ~(BB_SQUARE(move->from));
+		t->allPieces[c] |= BB_SQUARE(move->to);
+		t->allOccupiedSquares &= ~(BB_SQUARE(move->from));
+		t->allOccupiedSquares |= BB_SQUARE(move->to);
+		t->hash ^= zobrist.pieces[c][rey][move->from];
+		t->hash ^= zobrist.pieces[c][rey][move->to];
+
+		// Move rook based on destination
+		casilla rookFrom, rookTo;
+		if (move->to == g1) {
+			rookFrom = h1;
+			rookTo = f1;
+		} else if (move->to == c1) {
+			rookFrom = a1;
+			rookTo = d1;
+		} else if (move->to == g8) {
+			rookFrom = h8;
+			rookTo = f8;
+		} else if (move->to == c8) {
+			rookFrom = a8;
+			rookTo = d8;
+		} else
 			break;
-		default:
-			break;
+
+		t->piezas[c][torre] &= ~(BB_SQUARE(rookFrom));
+		t->piezas[c][torre] |= BB_SQUARE(rookTo);
+		t->allPieces[c] &= ~(BB_SQUARE(rookFrom));
+		t->allPieces[c] |= BB_SQUARE(rookTo);
+		t->allOccupiedSquares &= ~(BB_SQUARE(rookFrom));
+		t->allOccupiedSquares |= BB_SQUARE(rookTo);
+		t->hash ^= zobrist.pieces[c][torre][rookFrom];
+		t->hash ^= zobrist.pieces[c][torre][rookTo];
+
+		// Remove castling rights for the moving side
+		if (c == blancas) {
+			t->castlingRights &= ~(WHITE_OO | WHITE_OOO);
+		} else {
+			t->castlingRights &= ~(BLACK_OO | BLACK_OOO);
 		}
 		break;
+	}
 
-	case 3:
-		// promotion
-		t->piezas[c][move->piece] &= ~(C64(1) << move->from);
+	case 3: {
+		// Remove pawn from old square
+		t->piezas[c][peon] &= ~(C64(1) << move->from);
+		t->allPieces[c] &= ~(BB_SQUARE(move->from));
+		t->allOccupiedSquares &= ~(BB_SQUARE(move->from));
+		t->hash ^= zobrist.pieces[c][peon][move->from];
+
+		// Handle capture
 		if (move->capture != -1) {
 			t->piezas[!c][move->capture] &= ~(C64(1) << move->to);
+			t->allPieces[!c] &= ~(BB_SQUARE(move->to));
+			t->allOccupiedSquares &= ~(BB_SQUARE(move->to));
+			t->hash ^= zobrist.pieces[!c][move->capture][move->to];
 		}
-		t->piezas[c][move->piece] &= ~(C64(1) << move->to);
+
+		// Add promoted piece to new square
 		t->piezas[c][move->promoPiece] |= (C64(1) << move->to);
+		t->allPieces[c] |= BB_SQUARE(move->to);
+		t->allOccupiedSquares |= BB_SQUARE(move->to);
+		t->hash ^= zobrist.pieces[c][move->promoPiece][move->to];
+
 		break;
 	}
-	t->allPieces[c] &= ~(BB_SQUARE(move->from));
-	t->allPieces[c] |= BB_SQUARE(move->to);
-	t->allOccupiedSquares &= ~(BB_SQUARE(move->from));
-	t->allOccupiedSquares |= BB_SQUARE(move->to);
-	if (move->capture != -1) {
-		t->allPieces[!c] &= ~(BB_SQUARE(move->to));
 	}
-	// zobrist
-	t->hash ^= zobrist.pieces[c][move->piece][move->from];
-	if (move->capture != -1) {
-	}
+
+	// Toggle side to move
+	t->hash ^= zobrist.side;
 }
 bool inputAvaliable() {
 	struct timeval tv = {0, 0};
@@ -1616,9 +1643,9 @@ void proccesUCICommands(char command[256], Tablero * t) {
 					casilla to = (stringToSq(move + 2));
 					casilla from = (stringToSq(move));
 					tipoDePieza promo = 0;
-					tipoDePieza piece = -1;
+					tipoDePieza piece = 0;
 					int special = 0;
-					tipoDePieza capture = 0;
+					tipoDePieza capture = -1;
 					for (int i = peon; i <= rey; i++) {
 						if (BB_SQUARE(from) & t->piezas[colorToMove][i]) {
 							piece = i;
@@ -1643,6 +1670,7 @@ void proccesUCICommands(char command[256], Tablero * t) {
 					}
 					if (piece == peon && to == t->enPassantSquare) {
 						special = 1;
+						capture = peon;
 					}
 					if (piece == rey) {
 						if ((colorToMove == blancas && from == e1 && (to == g1 || to == c1)) ||
