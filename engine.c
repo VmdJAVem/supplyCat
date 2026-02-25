@@ -16,7 +16,7 @@ typedef uint64_t bitboard;
 #define BB_SQUARE(sq) (1ULL << (sq))
 #define RANK(r) (C64(0xFF) << (8 * (r)))
 #define C8 ((uint8_t)123)
-#define MAX_DEPTH 64
+#define MAX_DEPTH 128
 // enums
 typedef enum { blancas, negras } color;
 typedef enum { peon, caballo, alfil, torre, reina, rey } tipoDePieza;
@@ -258,7 +258,7 @@ static inline void swapMoveSort(moveSort * a, moveSort * b);
 static inline void moveToMoveSort(moveLists * input, moveSort output[], int depth);
 moveSort scoreMoveForSorting(Move * move, int depth);
 static inline int compareMoveSort(const void * a, const void * b);
-float quiescence(Tablero * t, color c, float alpha, float beta);
+float quiescence(Tablero * t, color c, float alpha, float beta, int qdepth);
 bitboard attackedByColor(Tablero * t, color attacker);
 void initZobrist();
 uint64_t computeZobrist(Zobrist * z, Tablero * t, color sideToMove);
@@ -305,7 +305,7 @@ float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta)
 	moveLists colorToMove = {0};
 	generateAllMoves(c, t, &colorToMove);
 	if (depth == 0 || colorToMove.count == 0) {
-		return quiescence(t, c, alpha, beta);
+		return quiescence(t, c, alpha, beta, 4);
 	}
 	if (nodes % 131072 == 0) {
 		if (inputAvaliable()) {
@@ -329,11 +329,13 @@ float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta)
 		if (alpha >= beta) {
 			if (moves[i].move.capture == 0 && moves[i].move.capture != 3) {
 				history[moves[i].move.from][moves[i].move.to] += depth * depth;
-				if (isEqualMoves(&move, &killerMoves[depth][0])) {
-					continue;
-				} else {
-					killerMoves[depth][1] = killerMoves[depth][0];
-					killerMoves[depth][0] = move;
+				if (depth < MAX_DEPTH) {
+					if (isEqualMoves(&move, &killerMoves[depth][0])) {
+						continue;
+					} else {
+						killerMoves[depth][1] = killerMoves[depth][0];
+						killerMoves[depth][0] = move;
+					}
 				}
 			}
 			break;
@@ -1863,8 +1865,10 @@ moveSort scoreMoveForSorting(Move * move, int depth) {
 			fflush(stdout);
 		}
 		score += history[move->from][move->to];
-		if (isEqualMoves(move, &killerMoves[depth][0]) || isEqualMoves(move, &killerMoves[depth][1])) {
-			score += 8000;
+		if (depth < MAX_DEPTH) {
+			if (isEqualMoves(move, &killerMoves[depth][0]) || isEqualMoves(move, &killerMoves[depth][1])) {
+				score += 8000;
+			}
 		}
 	}
 	if (move->special == 3) {
@@ -1913,7 +1917,10 @@ static inline int compareMoveSort(const void * a, const void * b) {
 	// Descending order: higher score first
 	return mb->sortingScore - ma->sortingScore;
 }
-float quiescence(Tablero * t, color c, float alpha, float beta) {
+float quiescence(Tablero * t, color c, float alpha, float beta, int qdepth) {
+	if (qdepth <= 0) {
+		return boardEval(t, c);
+	}
 	float standPat = boardEval(t, c); // current evaluation
 	if (standPat >= beta) {
 		return beta;
@@ -1930,7 +1937,7 @@ float quiescence(Tablero * t, color c, float alpha, float beta) {
 	for (int i = 0; i < captures.count; i++) {
 		Tablero temp = *t;
 		makeMove(&captures.moves[i], &temp, c);
-		float score = -quiescence(&temp, !c, -beta, -alpha);
+		float score = -quiescence(&temp, !c, -beta, -alpha, qdepth - 1);
 		if (score >= beta)
 			return beta;
 		if (score > alpha)
