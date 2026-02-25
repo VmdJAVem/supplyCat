@@ -124,11 +124,10 @@ typedef struct {
 #define TT_MASK (TT_SIZE - 1)
 
 typedef struct {
-	uint64_t key;  // full Zobrist hash to verify entry
-	int depth;     // remaining depth at which this position was searched
-	float score;   // evaluation (from perspective of side to move)
-	uint8_t flag;  // 0 = exact, 1 = lower bound (beta cutoff), 2 = upper bound (fail low)
-	Move bestMove; // optional, for move ordering
+	uint64_t key; // full Zobrist hash to verify entry
+	int depth;    // remaining depth at which this position was searched
+	float score;  // evaluation (from perspective of side to move)
+	uint8_t flag; // 0 = exact, 1 = lower bound (beta cutoff), 2 = upper bound (fail low)
 } TTEntry;
 
 TTEntry tt[TT_SIZE];
@@ -381,7 +380,6 @@ float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta)
 		entry->depth = depth;
 		entry->score = alpha;
 		entry->flag = flag;
-		entry->bestMove = bestMove; // if you have it – you may not have bestMove in recursive nodes
 	}
 	return alpha;
 }
