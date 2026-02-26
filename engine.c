@@ -272,6 +272,8 @@ moveSort scoreMoveForSorting(Move * move, int depth);
 static inline int compareMoveSort(const void * a, const void * b);
 float quiescence(Tablero * t, color c, float alpha, float beta, int qdepth);
 bitboard attackedByColor(Tablero * t, color attacker);
+void unmakeMove(Move * move, Tablero * t, color c, int oldEnPassant, uint8_t oldCastling, int oldHalfClock,
+		int oldFullClock);
 void initZobrist();
 uint64_t computeZobrist(Zobrist * z, Tablero * t, color sideToMove);
 void testZobrist();
@@ -283,10 +285,10 @@ void generateKnightCaptures(moveLists * ml, color c, Tablero * t);
 void generatePawnCaptures(moveLists * ml, color c, Tablero * t);
 void generateQueenCaptures(moveLists * ml, color c, Tablero * t);
 void generateKingCaptures(moveLists * ml, color c, Tablero * t);
+bool testUnmakeMove(Tablero * original, Move move, color c);
+void testUnmakeAll();
 int main() {
-	setbuf(stdout, NULL);
 	initAttackTables();
-	initZobrist();
 	/*
 	testZobrist();
 	testTT();
@@ -353,14 +355,19 @@ float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta)
 	moveToMoveSort(&colorToMove, moves, depth);
 	qsort(moves, colorToMove.count, sizeof(moveSort), compareMoveSort);
 	for (int i = 0; i < colorToMove.count; i++) {
-		Tablero temp = *t;
+		casilla oldEp = t->enPassantSquare;
+		uint8_t oldCastling = t->castlingRights;
+		int oldHalf = t->halfmoveClock;
+		int oldFull = t->fullMoves;
 		Move move = moves[i].move;
-		makeMove(&move, &temp, c);
-		casilla king = __builtin_ctzll(temp.piezas[c][rey]);
-		if (isAttacked(&temp, king, !c)) {
+		makeMove(&move, t, c);
+		casilla king = __builtin_ctzll(t->piezas[c][rey]);
+		if (isAttacked(t, king, !c)) {
+			unmakeMove(&move, t, c, oldEp, oldCastling, oldHalf, oldFull);
 			continue;
 		}
-		float score = -recursiveNegaMax(depth - 1, &temp, !c, -beta, -alpha);
+		float score = -recursiveNegaMax(depth - 1, t, !c, -beta, -alpha);
+		unmakeMove(&move, t, c, oldEp, oldCastling, oldHalf, oldFull);
 		if (score > alpha) {
 			alpha = score;
 		}
@@ -439,9 +446,13 @@ moveScore negaMax(Tablero * t, color c, int timeLimit) {
 					}
 				}
 			}
-			Tablero temp = *t;
-			makeMove(&colorToMove.moves[i], &temp, c);
-			float score = -recursiveNegaMax(depth, &temp, !c, -beta, -alpha);
+			casilla oldEp = t->enPassantSquare;
+			uint8_t oldCastling = t->castlingRights;
+			int oldHalf = t->halfmoveClock;
+			int oldFull = t->fullMoves;
+			makeMove(&colorToMove.moves[i], t, c);
+			float score = -recursiveNegaMax(depth, t, !c, -beta, -alpha);
+			unmakeMove(&colorToMove.moves[i], t, c, oldEp, oldCastling, oldHalf, oldFull);
 			if (score > localBestScore) {
 				localBestScore = score;
 				alpha = score;
@@ -497,9 +508,13 @@ moveScore negaMaxFixedDepth(Tablero * t, color c, int depth) {
 				}
 			}
 		}
-		Tablero temp = *t;
-		makeMove(&colorToMove.moves[i], &temp, c);
-		float score = -recursiveNegaMax(depth - 1, &temp, !c, -beta, -alpha);
+		casilla oldEp = t->enPassantSquare;
+		uint8_t oldCastling = t->castlingRights;
+		int oldHalf = t->halfmoveClock;
+		int oldFull = t->fullMoves;
+		makeMove(&colorToMove.moves[i], t, c);
+		float score = -recursiveNegaMax(depth - 1, t, !c, -beta, -alpha);
+		unmakeMove(&colorToMove.moves[i], t, c, oldEp, oldCastling, oldHalf, oldFull);
 
 		if (score > bestScore) {
 			bestScore = score;
@@ -566,19 +581,20 @@ void generateAllMoves(color c, Tablero * t, moveLists * output) {
 		printf("temp.count = %d\n", temp.count);
 	}
 	for (int i = 0; i < temp.count; i++) {
-		Tablero tempT = *t;
-		makeMove(&temp.moves[i], &tempT, c);
-		casilla king = __builtin_ctzll(tempT.piezas[c][rey]);
-		if (debug) {
-			printf("about to check move: %s\n", moveToStr(&temp.moves[i]));
-		}
-		if (!isAttacked(&tempT, king, !c)) {
+		casilla oldEp = t->enPassantSquare;
+		uint8_t oldCastling = t->castlingRights;
+		int oldHalf = t->halfmoveClock;
+		int oldFull = t->fullMoves;
+		makeMove(&temp.moves[i], t, c);
+		casilla king = __builtin_ctzll(t->piezas[c][rey]);
+		if (!isAttacked(t, king, !c)) {
 			output->moves[output->count] = temp.moves[i];
 			output->count++;
 			if (debug) {
 				printf("move %s passed\n", moveToStr(&temp.moves[i]));
 			}
 		}
+		unmakeMove(&temp.moves[i], t, c, oldEp, oldCastling, oldHalf, oldFull);
 	}
 }
 void generateAllPseudoMoves(color c, Tablero * t, moveLists * output) {
@@ -1372,30 +1388,162 @@ void makeMove(Move * move, Tablero * t, color c) {
 		t->halfmoveClock++;
 
 	switch (move->special) {
-	case 0: {
-		// Remove moving piece from old square
-		t->piezas[c][move->piece] &= ~(C64(1) << move->from);
-		t->allPieces[c] &= ~(BB_SQUARE(move->from));
-		t->allOccupiedSquares &= ~(BB_SQUARE(move->from));
-		t->hash ^= zobrist.pieces[c][move->piece][move->from];
+		case 0: {
+			// Remove moving piece from old square
+			t->piezas[c][move->piece] &= ~(C64(1) << move->from);
+			t->allPieces[c] &= ~(BB_SQUARE(move->from));
+			t->allOccupiedSquares &= ~(BB_SQUARE(move->from));
+			t->hash ^= zobrist.pieces[c][move->piece][move->from];
 
-		// Handle capture
-		if (move->capture != -1) {
-			t->piezas[!c][move->capture] &= ~(C64(1) << move->to);
-			t->allPieces[!c] &= ~(BB_SQUARE(move->to));
-			t->allOccupiedSquares &= ~(BB_SQUARE(move->to));
-			t->hash ^= zobrist.pieces[!c][move->capture][move->to];
+			// Handle capture
+			if (move->capture != -1) {
+				t->piezas[!c][move->capture] &= ~(C64(1) << move->to);
+				t->allPieces[!c] &= ~(BB_SQUARE(move->to));
+				t->allOccupiedSquares &= ~(BB_SQUARE(move->to));
+				t->hash ^= zobrist.pieces[!c][move->capture][move->to];
+			}
+
+			// Add moving piece to new square
+			t->piezas[c][move->piece] |= (C64(1) << move->to);
+			t->allPieces[c] |= BB_SQUARE(move->to);
+			t->allOccupiedSquares |= BB_SQUARE(move->to);
+			t->hash ^= zobrist.pieces[c][move->piece][move->to];
+
+			// Update castling rights based on old rights
+			// King move
+			if (move->piece == rey) {
+				if (c == blancas) {
+					if (oldCastling & WHITE_OO)
+						t->hash ^= zobrist.castling[0];
+					if (oldCastling & WHITE_OOO)
+						t->hash ^= zobrist.castling[1];
+					t->castlingRights &= ~(WHITE_OO | WHITE_OOO);
+				} else {
+					if (oldCastling & BLACK_OO)
+						t->hash ^= zobrist.castling[2];
+					if (oldCastling & BLACK_OOO)
+						t->hash ^= zobrist.castling[3];
+					t->castlingRights &= ~(BLACK_OO | BLACK_OOO);
+				}
+			}
+			// Rook move from original square
+			else if (move->piece == torre) {
+				if (move->from == h1 && (oldCastling & WHITE_OO)) {
+					t->hash ^= zobrist.castling[0];
+					t->castlingRights &= ~WHITE_OO;
+				}
+				if (move->from == a1 && (oldCastling & WHITE_OOO)) {
+					t->hash ^= zobrist.castling[1];
+					t->castlingRights &= ~WHITE_OOO;
+				}
+				if (move->from == h8 && (oldCastling & BLACK_OO)) {
+					t->hash ^= zobrist.castling[2];
+					t->castlingRights &= ~BLACK_OO;
+				}
+				if (move->from == a8 && (oldCastling & BLACK_OOO)) {
+					t->hash ^= zobrist.castling[3];
+					t->castlingRights &= ~BLACK_OOO;
+				}
+			}
+			// Rook capture
+			if (move->capture == torre) {
+				if (move->to == h1 && (oldCastling & WHITE_OO)) {
+					t->hash ^= zobrist.castling[0];
+					t->castlingRights &= ~WHITE_OO;
+				}
+				if (move->to == a1 && (oldCastling & WHITE_OOO)) {
+					t->hash ^= zobrist.castling[1];
+					t->castlingRights &= ~WHITE_OOO;
+				}
+				if (move->to == h8 && (oldCastling & BLACK_OO)) {
+					t->hash ^= zobrist.castling[2];
+					t->castlingRights &= ~BLACK_OO;
+				}
+				if (move->to == a8 && (oldCastling & BLACK_OOO)) {
+					t->hash ^= zobrist.castling[3];
+					t->castlingRights &= ~BLACK_OOO;
+				}
+			}
+
+			// Set en passant square if double pawn push
+			if (move->piece == peon && abs(move->to - move->from) == 16) {
+				if (c == blancas)
+					t->enPassantSquare = move->to - 8;
+				else
+					t->enPassantSquare = move->to + 8;
+				// XOR in new en passant file
+				int file = t->enPassantSquare % 8;
+				t->hash ^= zobrist.enPassant[file];
+			}
+			break;
 		}
 
-		// Add moving piece to new square
-		t->piezas[c][move->piece] |= (C64(1) << move->to);
-		t->allPieces[c] |= BB_SQUARE(move->to);
-		t->allOccupiedSquares |= BB_SQUARE(move->to);
-		t->hash ^= zobrist.pieces[c][move->piece][move->to];
+		case 1: {
+			if (enPassantSq == -1) {
+				fprintf(stderr, "Error: en passant move with no target square\n");
+				return;
+			}
+			casilla opponentPawn = (c == blancas ? enPassantSq - 8 : enPassantSq + 8);
 
-		// Update castling rights based on old rights
-		// King move
-		if (move->piece == rey) {
+			// Remove capturing pawn from old square
+			t->piezas[c][move->piece] &= ~(C64(1) << move->from);
+			t->allPieces[c] &= ~(BB_SQUARE(move->from));
+			t->allOccupiedSquares &= ~(BB_SQUARE(move->from));
+			t->hash ^= zobrist.pieces[c][move->piece][move->from];
+
+			// Remove captured pawn
+			t->piezas[!c][peon] &= ~(C64(1) << opponentPawn);
+			t->allPieces[!c] &= ~(BB_SQUARE(opponentPawn));
+			t->allOccupiedSquares &= ~(BB_SQUARE(opponentPawn));
+			t->hash ^= zobrist.pieces[!c][peon][opponentPawn];
+
+			// Add capturing pawn to new square
+			t->piezas[c][move->piece] |= (C64(1) << move->to);
+			t->allPieces[c] |= BB_SQUARE(move->to);
+			t->allOccupiedSquares |= BB_SQUARE(move->to);
+			t->hash ^= zobrist.pieces[c][move->piece][move->to];
+
+			break;
+		}
+
+		case 2: {
+			// Move king
+			t->piezas[c][rey] &= ~(C64(1) << move->from);
+			t->piezas[c][rey] |= (C64(1) << move->to);
+			t->allPieces[c] &= ~(BB_SQUARE(move->from));
+			t->allPieces[c] |= BB_SQUARE(move->to);
+			t->allOccupiedSquares &= ~(BB_SQUARE(move->from));
+			t->allOccupiedSquares |= BB_SQUARE(move->to);
+			t->hash ^= zobrist.pieces[c][rey][move->from];
+			t->hash ^= zobrist.pieces[c][rey][move->to];
+
+			// Move rook based on destination
+			casilla rookFrom, rookTo;
+			if (move->to == g1) {
+				rookFrom = h1;
+				rookTo = f1;
+			} else if (move->to == c1) {
+				rookFrom = a1;
+				rookTo = d1;
+			} else if (move->to == g8) {
+				rookFrom = h8;
+				rookTo = f8;
+			} else if (move->to == c8) {
+				rookFrom = a8;
+				rookTo = d8;
+			} else
+				break;
+
+			t->piezas[c][torre] &= ~(BB_SQUARE(rookFrom));
+			t->piezas[c][torre] |= BB_SQUARE(rookTo);
+			t->allPieces[c] &= ~(BB_SQUARE(rookFrom));
+			t->allPieces[c] |= BB_SQUARE(rookTo);
+			t->allOccupiedSquares &= ~(BB_SQUARE(rookFrom));
+			t->allOccupiedSquares |= BB_SQUARE(rookTo);
+			t->hash ^= zobrist.pieces[c][torre][rookFrom];
+			t->hash ^= zobrist.pieces[c][torre][rookTo];
+
+			// Update castling rights based on old rights
 			if (c == blancas) {
 				if (oldCastling & WHITE_OO)
 					t->hash ^= zobrist.castling[0];
@@ -1409,167 +1557,191 @@ void makeMove(Move * move, Tablero * t, color c) {
 					t->hash ^= zobrist.castling[3];
 				t->castlingRights &= ~(BLACK_OO | BLACK_OOO);
 			}
-		}
-		// Rook move from original square
-		else if (move->piece == torre) {
-			if (move->from == h1 && (oldCastling & WHITE_OO)) {
-				t->hash ^= zobrist.castling[0];
-				t->castlingRights &= ~WHITE_OO;
-			}
-			if (move->from == a1 && (oldCastling & WHITE_OOO)) {
-				t->hash ^= zobrist.castling[1];
-				t->castlingRights &= ~WHITE_OOO;
-			}
-			if (move->from == h8 && (oldCastling & BLACK_OO)) {
-				t->hash ^= zobrist.castling[2];
-				t->castlingRights &= ~BLACK_OO;
-			}
-			if (move->from == a8 && (oldCastling & BLACK_OOO)) {
-				t->hash ^= zobrist.castling[3];
-				t->castlingRights &= ~BLACK_OOO;
-			}
-		}
-		// Rook capture
-		if (move->capture == torre) {
-			if (move->to == h1 && (oldCastling & WHITE_OO)) {
-				t->hash ^= zobrist.castling[0];
-				t->castlingRights &= ~WHITE_OO;
-			}
-			if (move->to == a1 && (oldCastling & WHITE_OOO)) {
-				t->hash ^= zobrist.castling[1];
-				t->castlingRights &= ~WHITE_OOO;
-			}
-			if (move->to == h8 && (oldCastling & BLACK_OO)) {
-				t->hash ^= zobrist.castling[2];
-				t->castlingRights &= ~BLACK_OO;
-			}
-			if (move->to == a8 && (oldCastling & BLACK_OOO)) {
-				t->hash ^= zobrist.castling[3];
-				t->castlingRights &= ~BLACK_OOO;
-			}
-		}
-
-		// Set en passant square if double pawn push
-		if (move->piece == peon && abs(move->to - move->from) == 16) {
-			if (c == blancas)
-				t->enPassantSquare = move->to - 8;
-			else
-				t->enPassantSquare = move->to + 8;
-			// XOR in new en passant file
-			int file = t->enPassantSquare % 8;
-			t->hash ^= zobrist.enPassant[file];
-		}
-		break;
-	}
-
-	case 1: {
-		if (enPassantSq == -1) {
-			fprintf(stderr, "Error: en passant move with no target square\n");
-			return;
-		}
-		casilla opponentPawn = (c == blancas ? enPassantSq - 8 : enPassantSq + 8);
-
-		// Remove capturing pawn from old square
-		t->piezas[c][move->piece] &= ~(C64(1) << move->from);
-		t->allPieces[c] &= ~(BB_SQUARE(move->from));
-		t->allOccupiedSquares &= ~(BB_SQUARE(move->from));
-		t->hash ^= zobrist.pieces[c][move->piece][move->from];
-
-		// Remove captured pawn
-		t->piezas[!c][peon] &= ~(C64(1) << opponentPawn);
-		t->allPieces[!c] &= ~(BB_SQUARE(opponentPawn));
-		t->allOccupiedSquares &= ~(BB_SQUARE(opponentPawn));
-		t->hash ^= zobrist.pieces[!c][peon][opponentPawn];
-
-		// Add capturing pawn to new square
-		t->piezas[c][move->piece] |= (C64(1) << move->to);
-		t->allPieces[c] |= BB_SQUARE(move->to);
-		t->allOccupiedSquares |= BB_SQUARE(move->to);
-		t->hash ^= zobrist.pieces[c][move->piece][move->to];
-
-		break;
-	}
-
-	case 2: {
-		// Move king
-		t->piezas[c][rey] &= ~(C64(1) << move->from);
-		t->piezas[c][rey] |= (C64(1) << move->to);
-		t->allPieces[c] &= ~(BB_SQUARE(move->from));
-		t->allPieces[c] |= BB_SQUARE(move->to);
-		t->allOccupiedSquares &= ~(BB_SQUARE(move->from));
-		t->allOccupiedSquares |= BB_SQUARE(move->to);
-		t->hash ^= zobrist.pieces[c][rey][move->from];
-		t->hash ^= zobrist.pieces[c][rey][move->to];
-
-		// Move rook based on destination
-		casilla rookFrom, rookTo;
-		if (move->to == g1) {
-			rookFrom = h1;
-			rookTo = f1;
-		} else if (move->to == c1) {
-			rookFrom = a1;
-			rookTo = d1;
-		} else if (move->to == g8) {
-			rookFrom = h8;
-			rookTo = f8;
-		} else if (move->to == c8) {
-			rookFrom = a8;
-			rookTo = d8;
-		} else
 			break;
-
-		t->piezas[c][torre] &= ~(BB_SQUARE(rookFrom));
-		t->piezas[c][torre] |= BB_SQUARE(rookTo);
-		t->allPieces[c] &= ~(BB_SQUARE(rookFrom));
-		t->allPieces[c] |= BB_SQUARE(rookTo);
-		t->allOccupiedSquares &= ~(BB_SQUARE(rookFrom));
-		t->allOccupiedSquares |= BB_SQUARE(rookTo);
-		t->hash ^= zobrist.pieces[c][torre][rookFrom];
-		t->hash ^= zobrist.pieces[c][torre][rookTo];
-
-		// Update castling rights based on old rights
-		if (c == blancas) {
-			if (oldCastling & WHITE_OO)
-				t->hash ^= zobrist.castling[0];
-			if (oldCastling & WHITE_OOO)
-				t->hash ^= zobrist.castling[1];
-			t->castlingRights &= ~(WHITE_OO | WHITE_OOO);
-		} else {
-			if (oldCastling & BLACK_OO)
-				t->hash ^= zobrist.castling[2];
-			if (oldCastling & BLACK_OOO)
-				t->hash ^= zobrist.castling[3];
-			t->castlingRights &= ~(BLACK_OO | BLACK_OOO);
-		}
-		break;
-	}
-
-	case 3: {
-		// Remove pawn from old square
-		t->piezas[c][peon] &= ~(C64(1) << move->from);
-		t->allPieces[c] &= ~(BB_SQUARE(move->from));
-		t->allOccupiedSquares &= ~(BB_SQUARE(move->from));
-		t->hash ^= zobrist.pieces[c][peon][move->from];
-
-		// Handle capture
-		if (move->capture != -1) {
-			t->piezas[!c][move->capture] &= ~(C64(1) << move->to);
-			t->allPieces[!c] &= ~(BB_SQUARE(move->to));
-			t->allOccupiedSquares &= ~(BB_SQUARE(move->to));
-			t->hash ^= zobrist.pieces[!c][move->capture][move->to];
 		}
 
-		// Add promoted piece to new square
-		t->piezas[c][move->promoPiece] |= (C64(1) << move->to);
-		t->allPieces[c] |= BB_SQUARE(move->to);
-		t->allOccupiedSquares |= BB_SQUARE(move->to);
-		t->hash ^= zobrist.pieces[c][move->promoPiece][move->to];
+		case 3: {
+			// Remove pawn from old square
+			t->piezas[c][peon] &= ~(C64(1) << move->from);
+			t->allPieces[c] &= ~(BB_SQUARE(move->from));
+			t->allOccupiedSquares &= ~(BB_SQUARE(move->from));
+			t->hash ^= zobrist.pieces[c][peon][move->from];
 
-		break;
-	}
+			// Handle capture
+			if (move->capture != -1) {
+				t->piezas[!c][move->capture] &= ~(C64(1) << move->to);
+				t->allPieces[!c] &= ~(BB_SQUARE(move->to));
+				t->allOccupiedSquares &= ~(BB_SQUARE(move->to));
+				t->hash ^= zobrist.pieces[!c][move->capture][move->to];
+			}
+
+			// Add promoted piece to new square
+			t->piezas[c][move->promoPiece] |= (C64(1) << move->to);
+			t->allPieces[c] |= BB_SQUARE(move->to);
+			t->allOccupiedSquares |= BB_SQUARE(move->to);
+			t->hash ^= zobrist.pieces[c][move->promoPiece][move->to];
+
+			break;
+		}
 	}
 
 	// Toggle side to move
+	t->hash ^= zobrist.side;
+}
+void unmakeMove(Move * move, Tablero * t, color c, int oldEnPassant, uint8_t oldCastling, int oldHalfClock,
+		int oldFullClock) {
+
+	// Restore clocks (no hash impact)
+	t->halfmoveClock = oldHalfClock;
+	t->fullMoves = oldFullClock;
+
+	// Undo piece movements according to move type
+	switch (move->special) {
+		case 0: {
+			// Remove moving piece from destination square
+			t->piezas[c][move->piece] &= ~BB_SQUARE(move->to);
+			t->allPieces[c] &= ~BB_SQUARE(move->to);
+			t->allOccupiedSquares &= ~BB_SQUARE(move->to);
+			t->hash ^= zobrist.pieces[c][move->piece][move->to];
+
+			// If there was a capture, restore captured piece on destination
+			if (move->capture != -1) {
+				t->piezas[!c][move->capture] |= BB_SQUARE(move->to);
+				t->allPieces[!c] |= BB_SQUARE(move->to);
+				t->allOccupiedSquares |= BB_SQUARE(move->to);
+				t->hash ^= zobrist.pieces[!c][move->capture][move->to];
+			}
+
+			// Put moving piece back on original square
+			t->piezas[c][move->piece] |= BB_SQUARE(move->from);
+			t->allPieces[c] |= BB_SQUARE(move->from);
+			t->allOccupiedSquares |= BB_SQUARE(move->from);
+			t->hash ^= zobrist.pieces[c][move->piece][move->from];
+			break;
+		}
+
+		case 1: {
+			// Remove capturing pawn from destination
+			t->piezas[c][move->piece] &= ~BB_SQUARE(move->to);
+			t->allPieces[c] &= ~BB_SQUARE(move->to);
+			t->allOccupiedSquares &= ~BB_SQUARE(move->to);
+			t->hash ^= zobrist.pieces[c][move->piece][move->to];
+
+			// Put capturing pawn back on original
+			t->piezas[c][move->piece] |= BB_SQUARE(move->from);
+			t->allPieces[c] |= BB_SQUARE(move->from);
+			t->allOccupiedSquares |= BB_SQUARE(move->from);
+			t->hash ^= zobrist.pieces[c][move->piece][move->from];
+
+			// Restore captured pawn using old en passant square
+			casilla opponentPawn = (c == blancas ? oldEnPassant - 8 : oldEnPassant + 8);
+			t->piezas[!c][peon] |= BB_SQUARE(opponentPawn);
+			t->allPieces[!c] |= BB_SQUARE(opponentPawn);
+			t->allOccupiedSquares |= BB_SQUARE(opponentPawn);
+			t->hash ^= zobrist.pieces[!c][peon][opponentPawn];
+			break;
+		}
+
+		case 2: {
+			// Undo king move
+			t->piezas[c][rey] &= ~BB_SQUARE(move->to);
+			t->allPieces[c] &= ~BB_SQUARE(move->to);
+			t->allOccupiedSquares &= ~BB_SQUARE(move->to);
+			t->hash ^= zobrist.pieces[c][rey][move->to];
+
+			t->piezas[c][rey] |= BB_SQUARE(move->from);
+			t->allPieces[c] |= BB_SQUARE(move->from);
+			t->allOccupiedSquares |= BB_SQUARE(move->from);
+			t->hash ^= zobrist.pieces[c][rey][move->from];
+
+			// Determine rook's original and destination squares (reverse of makeMove)
+			casilla rookFrom, rookTo;
+			if (move->to == g1) {
+				rookFrom = f1;
+				rookTo = h1;
+			} else if (move->to == c1) {
+				rookFrom = d1;
+				rookTo = a1;
+			} else if (move->to == g8) {
+				rookFrom = f8;
+				rookTo = h8;
+			} else if (move->to == c8) {
+				rookFrom = d8;
+				rookTo = a8;
+			} else
+				break;
+
+			// Undo rook move
+			t->piezas[c][torre] &= ~BB_SQUARE(rookFrom);
+			t->allPieces[c] &= ~BB_SQUARE(rookFrom);
+			t->allOccupiedSquares &= ~BB_SQUARE(rookFrom);
+			t->hash ^= zobrist.pieces[c][torre][rookFrom];
+
+			t->piezas[c][torre] |= BB_SQUARE(rookTo);
+			t->allPieces[c] |= BB_SQUARE(rookTo);
+			t->allOccupiedSquares |= BB_SQUARE(rookTo);
+			t->hash ^= zobrist.pieces[c][torre][rookTo];
+			break;
+		}
+
+		case 3: {
+			// Remove promoted piece from destination
+			t->piezas[c][move->promoPiece] &= ~BB_SQUARE(move->to);
+			t->allPieces[c] &= ~BB_SQUARE(move->to);
+			t->allOccupiedSquares &= ~BB_SQUARE(move->to);
+			t->hash ^= zobrist.pieces[c][move->promoPiece][move->to];
+
+			// If there was a capture, restore captured piece on destination
+			if (move->capture != -1) {
+				t->piezas[!c][move->capture] |= BB_SQUARE(move->to);
+				t->allPieces[!c] |= BB_SQUARE(move->to);
+				t->allOccupiedSquares |= BB_SQUARE(move->to);
+				t->hash ^= zobrist.pieces[!c][move->capture][move->to];
+			}
+
+			// Restore pawn on original square
+			t->piezas[c][peon] |= BB_SQUARE(move->from);
+			t->allPieces[c] |= BB_SQUARE(move->from);
+			t->allOccupiedSquares |= BB_SQUARE(move->from);
+			t->hash ^= zobrist.pieces[c][peon][move->from];
+			break;
+		}
+	}
+
+	// --- Restore castling rights and update hash ---
+	uint8_t currentRights = t->castlingRights;
+	if (currentRights & WHITE_OO)
+		t->hash ^= zobrist.castling[0];
+	if (currentRights & WHITE_OOO)
+		t->hash ^= zobrist.castling[1];
+	if (currentRights & BLACK_OO)
+		t->hash ^= zobrist.castling[2];
+	if (currentRights & BLACK_OOO)
+		t->hash ^= zobrist.castling[3];
+
+	if (oldCastling & WHITE_OO)
+		t->hash ^= zobrist.castling[0];
+	if (oldCastling & WHITE_OOO)
+		t->hash ^= zobrist.castling[1];
+	if (oldCastling & BLACK_OO)
+		t->hash ^= zobrist.castling[2];
+	if (oldCastling & BLACK_OOO)
+		t->hash ^= zobrist.castling[3];
+
+	t->castlingRights = oldCastling;
+
+	// --- Restore en passant square and update hash ---
+	if (t->enPassantSquare != -1) {
+		int file = t->enPassantSquare % 8;
+		t->hash ^= zobrist.enPassant[file];
+	}
+	if (oldEnPassant != -1) {
+		int file = oldEnPassant % 8;
+		t->hash ^= zobrist.enPassant[file];
+	}
+	t->enPassantSquare = oldEnPassant;
+
+	// Toggle side to move back (undo the side change)
 	t->hash ^= zobrist.side;
 }
 bool inputAvaliable() {
@@ -1829,31 +2001,31 @@ void proccesUCICommands(char command[256], Tablero * t) {
 					if (strcmp(possible2ndCommands[i], secondCommand) == 0) {
 						char * valueStr = strtok(NULL, " \t\n\r\f\v");
 						switch (i) {
-						case 0:
-							parameters.wtime = atoi(valueStr);
-							break;
-						case 1:
-							parameters.btime = atoi(valueStr);
-							break;
-						case 2:
-							parameters.winc = atoi(valueStr);
-							break;
-						case 3:
-							parameters.binc = atoi(valueStr);
-							break;
-						case 4:
-							parameters.movestogo = atoi(valueStr);
-							break;
-						case 5:
+							case 0:
+								parameters.wtime = atoi(valueStr);
+								break;
+							case 1:
+								parameters.btime = atoi(valueStr);
+								break;
+							case 2:
+								parameters.winc = atoi(valueStr);
+								break;
+							case 3:
+								parameters.binc = atoi(valueStr);
+								break;
+							case 4:
+								parameters.movestogo = atoi(valueStr);
+								break;
+							case 5:
 
-							parameters.depth = atoi(valueStr);
-							break;
-						case 6:
-							parameters.movetime = atoi(valueStr);
-							break;
-						case 7:
-							parameters.infinite = true;
-							break;
+								parameters.depth = atoi(valueStr);
+								break;
+							case 6:
+								parameters.movetime = atoi(valueStr);
+								break;
+							case 7:
+								parameters.infinite = true;
+								break;
 						}
 					}
 				}
@@ -1903,24 +2075,24 @@ void proccesUCICommands(char command[256], Tablero * t) {
 }
 static inline tipoDePieza charToPiece(char c) {
 	switch (c) {
-	case 'p':
-	case 'P':
-		return peon;
-	case 'r':
-	case 'R':
-		return torre;
-	case 'n':
-	case 'N':
-		return caballo;
-	case 'b':
-	case 'B':
-		return alfil;
-	case 'q':
-	case 'Q':
-		return reina;
-	case 'k':
-	case 'K':
-		return rey;
+		case 'p':
+		case 'P':
+			return peon;
+		case 'r':
+		case 'R':
+			return torre;
+		case 'n':
+		case 'N':
+			return caballo;
+		case 'b':
+		case 'B':
+			return alfil;
+		case 'q':
+		case 'Q':
+			return reina;
+		case 'k':
+		case 'K':
+			return rey;
 	}
 	return 0;
 }
@@ -1931,18 +2103,18 @@ static inline casilla stringToSq(const char * sq) {
 }
 static inline char pieceToChar(tipoDePieza piece) {
 	switch (piece) {
-	case peon:
-		return 'p';
-	case torre:
-		return 'r';
-	case caballo:
-		return 'n';
-	case alfil:
-		return 'b';
-	case reina:
-		return 'q';
-	case rey:
-		return 'k';
+		case peon:
+			return 'p';
+		case torre:
+			return 'r';
+		case caballo:
+			return 'n';
+		case alfil:
+			return 'b';
+		case reina:
+			return 'q';
+		case rey:
+			return 'k';
 	}
 	printf("error: invalid fen\n");
 }
@@ -2053,13 +2225,18 @@ float quiescence(Tablero * t, color c, float alpha, float beta, int qdepth) {
 	qsort(moves, captures.count, sizeof(moveSort), compareMoveSort);
 
 	for (int i = 0; i < captures.count; i++) {
-		Tablero temp = *t;
-		makeMove(&captures.moves[i], &temp, c);
-		casilla king = __builtin_ctzll(temp.piezas[c][rey]);
+		casilla oldEp = t->enPassantSquare;
+		uint8_t oldCastling = t->castlingRights;
+		int oldHalf = t->halfmoveClock;
+		int oldFull = t->fullMoves;
+		makeMove(&captures.moves[i], t, c);
+		casilla king = __builtin_ctzll(t->piezas[c][rey]);
 		if (isAttacked(t, king, !c)) {
+			unmakeMove(&captures.moves[i], t, c, oldEp, oldCastling, oldHalf, oldFull);
 			continue;
 		}
-		float score = -quiescence(&temp, !c, -beta, -alpha, qdepth - 1);
+		float score = -quiescence(t, !c, -beta, -alpha, qdepth - 1);
+		unmakeMove(&captures.moves[i], t, c, oldEp, oldCastling, oldHalf, oldFull);
 		if (score >= beta)
 			return beta;
 		if (score > alpha)
@@ -2466,4 +2643,90 @@ void generateKingCaptures(moveLists * ml, color c, Tablero * t) {
 			ml->moves[ml->count++] = move;
 		}
 	}
+}
+bool testUnmakeMove(Tablero * original, Move move, color c) {
+	Tablero copy = *original;
+	// Save old state for unmake (assuming unmakeMove requires these)
+	casilla oldEp = original->enPassantSquare;
+	uint8_t oldCastling = original->castlingRights;
+	int oldHalf = original->halfmoveClock;
+	int oldFull = original->fullMoves;
+
+	makeMove(&move, &copy, c);
+	unmakeMove(&move, &copy, c, oldEp, oldCastling, oldHalf, oldFull);
+
+	// Compare copy with original
+	if (memcmp(&copy, original, sizeof(Tablero)) == 0) {
+		printf("unmakeMove passed for move %s\n", moveToStr(&move));
+		return true;
+	} else {
+		printf("unmakeMove FAILED for move %s\n", moveToStr(&move));
+		// Optional: print differences (e.g., compare allPieces, hash, etc.)
+		return false;
+	}
+}
+void testUnmakeAll() {
+	Tablero original;
+	Move move;
+
+	// ------------------------------------------------------------
+	// Test 1: Normal capture
+	// Position: white pawn on e4, black pawn on d5
+	initBoard(&original);
+	// Clear all pieces first
+	memset(&original, 0, sizeof(Tablero));
+	// Place white pawn on e4 (square 28)
+	original.piezas[blancas][peon] = BB_SQUARE(28);
+	// Place black pawn on d5 (square 27)
+	original.piezas[negras][peon] = BB_SQUARE(27);
+	updateBoardCache(&original);
+	original.hash = computeZobrist(&zobrist, &original, blancas);
+	move = (Move){28, 27, peon, peon, 0, 0}; // capture, captured piece = pawn
+	testUnmakeMove(&original, move, blancas);
+	// Test 2: En passant capture
+	// Position: white pawn on e5 (square 36), black pawn on d5 (square 35),
+	//           en passant target d6 (square 43) is set (because black's last move was d7-d5)
+	memset(&original, 0, sizeof(Tablero));
+	original.piezas[blancas][peon] = BB_SQUARE(36); // e5
+	original.piezas[negras][peon] = BB_SQUARE(35);	// d5
+	original.enPassantSquare = 43;			// d6
+	updateBoardCache(&original);
+	original.hash = computeZobrist(&zobrist, &original, blancas);
+	move = (Move){36, 43, peon, peon, 1, 0}; // from e5 to d6, capture pawn, special=1
+	testUnmakeMove(&original, move, blancas);
+
+	// ------------------------------------------------------------
+	// Test 3: Castling (white kingside)
+	// Position: white king e1 (4), white rook h1 (7), no pieces in between
+	memset(&original, 0, sizeof(Tablero));
+	original.piezas[blancas][rey] = BB_SQUARE(4);
+	original.piezas[blancas][torre] = BB_SQUARE(7);
+	original.castlingRights = WHITE_OO;
+	updateBoardCache(&original);
+	original.hash = computeZobrist(&zobrist, &original, blancas);
+	move = (Move){4, 6, rey, -1, 2, 0}; // e1g1, special=2
+	testUnmakeMove(&original, move, blancas);
+
+	// ------------------------------------------------------------
+	// Test 4: Promotion without capture
+	// Position: white pawn on e7 (52), empty e8 (60)
+	memset(&original, 0, sizeof(Tablero));
+	original.piezas[blancas][peon] = BB_SQUARE(52);
+	updateBoardCache(&original);
+	original.hash = computeZobrist(&zobrist, &original, blancas);
+	move = (Move){52, 60, peon, -1, 3, reina}; // promote to queen
+	testUnmakeMove(&original, move, blancas);
+
+	// ------------------------------------------------------------
+	// Test 5: Promotion with capture
+	// Position: white pawn on e7 (52), black rook on e8 (60)
+	memset(&original, 0, sizeof(Tablero));
+	original.piezas[blancas][peon] = BB_SQUARE(52);
+	original.piezas[negras][torre] = BB_SQUARE(60);
+	updateBoardCache(&original);
+	original.hash = computeZobrist(&zobrist, &original, blancas);
+	move = (Move){52, 60, peon, torre, 3, reina}; // capture and promote
+	testUnmakeMove(&original, move, blancas);
+
+	printf("All unmakeMove tests completed.\n");
 }
