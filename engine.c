@@ -274,18 +274,15 @@ float quiescence(Tablero * t, color c, float alpha, float beta, int qdepth);
 bitboard attackedByColor(Tablero * t, color attacker);
 void initZobrist();
 uint64_t computeZobrist(Zobrist * z, Tablero * t, color sideToMove);
+void testZobrist();
+void testTT();
 int main() {
+	setbuf(stdout, NULL);
 	initAttackTables();
 	initZobrist();
 	/*
-	Tablero t;
-	initBoard(&t);
-	struct timespec start, end;
-	clock_gettime(CLOCK_MONOTONIC, &start);
-	moveScore best = negaMaxFixedDepth(&t, blancas, 10);
-	clock_gettime(CLOCK_MONOTONIC, &end);
-	double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
-	printf("info nodes %lld nps %.0f\n", nodes, nodes / elapsed);
+	testZobrist();
+	testTT();
 	*/
 	while (true) {
 		if (inputAvaliable()) {
@@ -309,11 +306,15 @@ void printBitboard(bitboard bb) {
 	}
 	printf("  a b c d e f g h\n\n");
 }
+
+static long long int TThits = 0, TTmisses = 0;
 float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta) {
+	nodes++;
 	int index = t->hash & TT_MASK;
 	TTEntry * entry = &tt[index];
 	if (entry->key == t->hash && entry->depth >= depth) {
 		// We have a stored result from at least this depth
+		TThits++;
 		if (entry->flag == 0)
 			return entry->score; // exact score
 		if (entry->flag == 1 && entry->score >= beta)
@@ -321,9 +322,10 @@ float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta)
 		if (entry->flag == 2 && entry->score <= alpha)
 			return alpha; // upper bound cutoff
 		// Otherwise, we can't use the score directly, but we might still use the best move for ordering
+	} else {
+		TTmisses++;
 	}
 	float oldAlpha = alpha;
-	nodes++;
 	if (debug) {
 		printf("DEBUG: recursiveNegaMax start, colorToMove = %d\n", c);
 	}
@@ -384,7 +386,6 @@ float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta)
 	return alpha;
 }
 moveScore negaMax(Tablero * t, color c, int timeLimit) {
-	memset(tt, 0, sizeof(tt));
 	if (debug) {
 		printf("DEBUG: negaMax start, colorToMove = %d\n", colorToMove);
 	}
@@ -457,14 +458,15 @@ moveScore negaMax(Tablero * t, color c, int timeLimit) {
 	if (debug) {
 		printf("%lld nodes searched\n", nodes);
 	}
+	if (debug) {
+		printf("TT probes: %lld, hits: %lld, hit rate: %.2f%%\n", TTmisses, TThits, 100.0 * TThits / TTmisses);
+	}
 	return bm;
 }
 moveScore negaMaxFixedDepth(Tablero * t, color c, int depth) {
-	memset(tt, 0, sizeof(tt));
 	moveLists colorToMove = {0};
 	generateAllMoves(c, t, &colorToMove);
 	memset(history, 0, sizeof(history));
-
 	if (colorToMove.count == 0) {
 		moveScore output = {.move = {0}, .score = boardEval(t, c)};
 		return output;
@@ -499,6 +501,9 @@ moveScore negaMaxFixedDepth(Tablero * t, color c, int depth) {
 	if (debug) {
 		printf("%lld nodes searched\n", nodes);
 	}
+	if (debug) {
+		printf("TT probes: %lld, hits: %lld, hit rate: %.2f%%\n", TTmisses, TThits, 100.0 * TThits / TTmisses);
+	}
 	return result;
 }
 void initBoard(Tablero * t) {
@@ -525,6 +530,9 @@ void initBoard(Tablero * t) {
 	t->castlingRights = WHITE_OO | WHITE_OOO | BLACK_OO | BLACK_OOO;
 	t->hash = computeZobrist(&zobrist, t, blancas);
 	updateBoardCache(t);
+	if (debug) {
+		printBitboard(t->allOccupiedSquares);
+	}
 }
 void updateBoardCache(Tablero * t) {
 	t->allPieces[blancas] = t->piezas[blancas][peon] | t->piezas[blancas][caballo] | t->piezas[blancas][alfil] |
@@ -543,13 +551,22 @@ void generateAllMoves(color c, Tablero * t, moveLists * output) {
 	generateRookMoves(&temp, c, t);
 	generateBishopMoves(&temp, c, t);
 	generateQueenMoves(&temp, c, t);
+	if (debug) {
+		printf("temp.count = %d\n", temp.count);
+	}
 	for (int i = 0; i < temp.count; i++) {
 		Tablero tempT = *t;
 		makeMove(&temp.moves[i], &tempT, c);
 		casilla king = __builtin_ctzll(tempT.piezas[c][rey]);
+		if (debug) {
+			printf("about to check move: %s\n", moveToStr(&temp.moves[i]));
+		}
 		if (!isAttacked(&tempT, king, !c)) {
 			output->moves[output->count] = temp.moves[i];
 			output->count++;
+			if (debug) {
+				printf("move %s passed\n", moveToStr(&temp.moves[i]));
+			}
 		}
 	}
 }
@@ -788,30 +805,26 @@ void generateKnightMoves(moveLists * ml, color c, Tablero * t) {
 }
 void generateKingMoves(moveLists * ml, color c, Tablero * t) {
 	bitboard king = t->piezas[c][rey];
-	if (king == 0) {
-		// this should NOT happen
+	if (king == 0)
 		return;
-	}
-	if (king & (king - 1)) {
-		return;
-	}
+	if (king & (king - 1))
+		return; // multiple kings (shouldn't happen)
 	casilla from = __builtin_ctzll(king);
-	bitboard attacks = kingAttacks[from] & (~t->allPieces[c]);
-	for (int i = 0; i < 64; i++) {
-		if (attacks & (C64(1) << i)) {
-			int capture = -1;
-			if (BB_SQUARE(i) & t->allPieces[!c]) {
-				for (int piece = peon; piece <= rey; piece++) {
-					if (t->piezas[!c][piece] & BB_SQUARE(i)) {
-						capture = piece;
-						break;
-					}
+	bitboard attacks = kingAttacks[from] & ~t->allPieces[c];
+	while (attacks) {
+		casilla to = __builtin_ctzll(attacks);
+		attacks &= attacks - 1;
+		int capture = -1;
+		if (BB_SQUARE(to) & t->allPieces[!c]) {
+			for (int piece = peon; piece <= rey; piece++) {
+				if (t->piezas[!c][piece] & BB_SQUARE(to)) {
+					capture = piece;
+					break;
 				}
-				Move move = {from, i, rey, capture, 0, 0};
-				ml->moves[ml->count] = move;
-				ml->count++;
 			}
 		}
+		Move move = {from, to, rey, capture, 0, 0};
+		ml->moves[ml->count++] = move;
 	}
 
 	bitboard attacked = attackedByColor(t, !c);
@@ -832,8 +845,8 @@ void generateKingMoves(moveLists * ml, color c, Tablero * t) {
 				}
 				if (canCastleKingSide &&
 				    !(BB_SQUARE(from) & attacked ||
-				      BB_SQUARE(g1) & attacked)) { // is the square we are  moving to attacked || is the
-								   // king in check
+				      BB_SQUARE(g1) & attacked)) { // is the square we are  moving to attacked
+								   // || is the king in check
 					casilla to = g1;
 					Move move = {from, to, rey, -1, 2, 0};
 					ml->moves[ml->count] = move;
@@ -1335,9 +1348,9 @@ float boardEval(Tablero * t, color c) {
 }
 void makeMove(Move * move, Tablero * t, color c) {
 	casilla enPassantSq = t->enPassantSquare;
-	uint8_t oldCastling = t->castlingRights; // Save before changes
+	uint8_t oldCastling = t->castlingRights; // save before any changes
 
-	// XOR out old en passant square (if any)
+	// XOR out old en passant file (if any)
 	if (t->enPassantSquare != -1) {
 		int file = t->enPassantSquare % 8;
 		t->hash ^= zobrist.enPassant[file];
@@ -1466,7 +1479,6 @@ void makeMove(Move * move, Tablero * t, color c) {
 		t->allOccupiedSquares |= BB_SQUARE(move->to);
 		t->hash ^= zobrist.pieces[c][move->piece][move->to];
 
-		// No castling changes, no en passant setting (already cleared)
 		break;
 	}
 
@@ -1545,7 +1557,6 @@ void makeMove(Move * move, Tablero * t, color c) {
 		t->allOccupiedSquares |= BB_SQUARE(move->to);
 		t->hash ^= zobrist.pieces[c][move->promoPiece][move->to];
 
-		// No castling changes
 		break;
 	}
 	}
@@ -1577,6 +1588,10 @@ void proccesUCICommands(char command[256], Tablero * t) {
 	} else if (strcmp(command, "isready\n") == 0) {
 		printf("readyok\n");
 		return;
+	} else if (strcmp(command, "ucinewgame") == 0) {
+		memset(tt, 0, sizeof(tt));
+		memset(history, 0, sizeof(history));
+		memset(killerMoves, 0, sizeof(killerMoves));
 	}
 	if (debug) {
 		printf("DEBUG: full command = '%s'\n", command);
@@ -1659,6 +1674,7 @@ void proccesUCICommands(char command[256], Tablero * t) {
 					makeMove(&newMove, t, colorToMove);
 					move = strtok(NULL, " ");
 					colorToMove = !colorToMove;
+					updateBoardCache(t);
 				}
 			}
 			if (debug) {
@@ -1836,7 +1852,13 @@ void proccesUCICommands(char command[256], Tablero * t) {
 				secondCommand = strtok(NULL, " \t\n\r\f\v");
 			}
 			if (parameters.depth != -1) {
+				clock_t start, end;
+				double cpu_time_used;
+				start = clock();
 				moveScore bestMove = negaMaxFixedDepth(t, colorToMove, parameters.depth);
+				end = clock();
+				cpu_time_used = ((double)(end - start)) / CLOCKS_PER_SEC;
+				printf("Time taken by myFunction: %f seconds\n", cpu_time_used);
 				printf("bestmove %s\n", moveToStr(&bestMove.move));
 
 			} else if (parameters.movetime != -1) {
@@ -2174,4 +2196,83 @@ uint64_t computeZobrist(Zobrist * z, Tablero * t, color sideToMove) {
 		hash ^= z->enPassant[file];
 	}
 	return hash;
+}
+void testZobrist() {
+	Tablero t;
+	initBoard(&t);
+	// First sequence: e2e4, e7e5, g1f3, b8c6
+	char * moves1[] = {"e2e4", "e7e5", "g1f3", "b8c6"};
+	color side = blancas;
+	for (int i = 0; i < 4; i++) {
+		Move move;
+		move.from = stringToSq(moves1[i]);
+		move.to = stringToSq(moves1[i] + 2);
+		move.piece = -1;
+		for (int p = peon; p <= rey; p++) {
+			if (BB_SQUARE(move.from) & t.piezas[side][p]) {
+				move.piece = p;
+				break;
+			}
+		}
+		move.capture = -1;
+		move.special = 0;
+		move.promoPiece = 0;
+		makeMove(&move, &t, side);
+		side = !side;
+	}
+	uint64_t hash1 = t.hash;
+
+	// Second sequence: g1f3, e7e5, e2e4, b8c6
+	initBoard(&t);
+	char * moves2[] = {"g1f3", "e7e5", "e2e4", "b8c6"};
+	side = blancas;
+	for (int i = 0; i < 4; i++) {
+		Move move;
+		move.from = stringToSq(moves2[i]);
+		move.to = stringToSq(moves2[i] + 2);
+		move.piece = -1;
+		for (int p = peon; p <= rey; p++) {
+			if (BB_SQUARE(move.from) & t.piezas[side][p]) {
+				move.piece = p;
+				break;
+			}
+		}
+		move.capture = -1;
+		move.special = 0;
+		move.promoPiece = 0;
+		makeMove(&move, &t, side);
+		side = !side;
+	}
+	uint64_t hash2 = t.hash;
+
+	printf("hash1 = %lx, hash2 = %lx\n", hash1, hash2);
+	if (hash1 == hash2)
+		printf("Hashes match! makeMove works.\n");
+	else
+		printf("Hashes still differ – check other bugs.\n");
+}
+void testTT() {
+	// Clear the table once before starting
+	memset(tt, 0, sizeof(tt));
+
+	Tablero t;
+	initBoard(&t);
+	struct timespec start, end;
+	uint64_t nodes_before, nodes_after;
+
+	// First search
+	nodes = 0;
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	moveScore best1 = negaMaxFixedDepth(&t, blancas, 5);
+	clock_gettime(CLOCK_MONOTONIC, &end);
+	double elapsed1 = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+	printf("First: nodes %lld time %.3f s nps %.0f\n", nodes, elapsed1, nodes / elapsed1);
+
+	// Second search (same position, table now populated)
+	nodes = 0;
+	clock_gettime(CLOCK_MONOTONIC, &start);
+	moveScore best2 = negaMaxFixedDepth(&t, blancas, 5);
+	clock_gettime(CLOCK_MONOTONIC, &end);
+	double elapsed2 = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+	printf("Second: nodes %lld time %.3f s nps %.0f\n", nodes, elapsed2, nodes / elapsed2);
 }
