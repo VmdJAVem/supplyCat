@@ -1342,12 +1342,12 @@ float boardEval(Tablero * t, color c, int myMoveCount) {
 	int myMobility = myMoveCount;
 	if (myMobility == -1) {
 		moveLists moves;
-		generateAllMoves(c, t, &moves);
+		generateAllPseudoMoves(c, t, &moves);
 		myMobility = moves.count;
 	}
 	// Always generate opponent's moves for mobility
 	moveLists oppMoves;
-	generateAllMoves(!c, t, &oppMoves);
+	generateAllPseudoMoves(!c, t, &oppMoves);
 	int oppMobility = oppMoves.count;
 
 	value += 10 * (myMobility - oppMobility);
