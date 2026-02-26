@@ -189,8 +189,8 @@ long long nodes = 0;
 int positionalValues[2][6][64] = {
     // blancas
     {// peon
-     {0,  0,  0,  0,  0,  0,  0,  0,  50, 50, 50, 50, 50, 50, 50, 50, 30, 30, 30, 40, 40, 30,
-      30, 30, 20, 20, 20, 30, 30, 20, 20, 20, 10, 10, 10, 20, 20, 10, 10, 10, 5,  5,  10, 10,
+     {0,  0,  0,  0,  0,  0,  0,  0,  50, 50, 50, 50, 50, 50, 50, 50, 30, 30, 35, 40, 40, 35,
+      30, 30, 20, 20, 25, 30, 30, 25, 20, 20, 10, 10, 15, 20, 20, 15, 10, 10, 5,  5,  10, 10,
       10, 10, 5,  5,  0,  0,  0,  5,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0},
      // caballo
      {-50, -40, -30, -30, -30, -30, -40, -50, -40, -20, 0,   0,	  0,   0,   -20, -40, -30, 0,	10,  15, 15, 10,
@@ -207,14 +207,14 @@ int positionalValues[2][6][64] = {
      {-20, -10, -10, -5,  -5,  -10, -10, -20, -10, 0,  0, 0,   0,   0,	 0,   -10, -10, 0,   5,	  5,  5, 5,
       0,   -10, -5,  0,	  5,   5,   5,	 5,   0,   -5, 0, 0,   5,   5,	 5,   5,   0,	-5,  -10, 5,  5, 5,
       5,   5,	0,   -10, -10, 0,   5,	 0,   0,   0,  0, -10, -20, -10, -10, -5,  -5,	-10, -10, -20},
-     // rey
+     // rey (medio juego)
      {-30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40,
       -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -20, -30, -30, -40, -40, -30, -30, -20, -10, -20, -20, -20,
       -20, -20, -20, -10, 20,  20,  0,	 0,   0,   0,	20,  20,  20,  30,  10,	 0,   0,   10,	30,  20}},
-    // negras
+    // negras (espejo vertical)
     {// peon
-     {0,  0,  0,  0,  0,  0,  0,  0,  50, 50, 50, 50, 50, 50, 50, 50, 30, 30, 30, 40, 40, 30,
-      30, 30, 20, 20, 20, 30, 30, 20, 20, 20, 10, 10, 10, 20, 20, 10, 10, 10, 5,  5,  10, 10,
+     {0,  0,  0,  0,  0,  0,  0,  0,  50, 50, 50, 50, 50, 50, 50, 50, 30, 30, 35, 40, 40, 35,
+      30, 30, 20, 20, 25, 30, 30, 25, 20, 20, 10, 10, 15, 20, 20, 15, 10, 10, 5,  5,  10, 10,
       10, 10, 5,  5,  0,  0,  0,  5,  5,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0},
      // caballo
      {-50, -40, -30, -30, -30, -30, -40, -50, -40, -20, 0,   0,	  0,   0,   -20, -40, -30, 0,	10,  15, 15, 10,
@@ -228,14 +228,13 @@ int positionalValues[2][6][64] = {
      {0,  0, 0, 5, 5, 0, 0, 0,	-5, 0, 0, 0, 0, 0, 0, -5, -5, 0,  0,  0,  0,  0,  0,  -5, -5, 0, 0, 0, 0, 0, 0, -5,
       -5, 0, 0, 0, 0, 0, 0, -5, -5, 0, 0, 0, 0, 0, 0, -5, 5,  10, 10, 10, 10, 10, 10, 5,  0,  0, 0, 0, 0, 0, 0, 0},
      // reina
-     {-20, -10, -10, -5,  -5,  -10, -10, -20, -10, 0,  5,  0,	0,   0,	  0,   -10, -10, 5,   5,   5,  5, 5,
-      0,   -10, 0,   0,	  5,   5,   5,	 5,   0,   -5, -5, 0,	5,   5,	  5,   5,   0,	 -5,  -10, 0,  5, 5,
-      5,   5,	0,   -10, -10, 0,   0,	 0,   0,   0,  0,  -10, -20, -10, -10, -5,  -5,	 -10, -10, -20},
-     // rey
-     {20,  30,	10,  0,	  0,   10,  30,	 20,  20,  20,	0,   0,	  0,   0,   20,	 20,  -10, -20, -20, -20, -20, -20,
-      -20, -10, -20, -30, -30, -40, -40, -30, -30, -20, -30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50,
-      -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30}}};
-
+     {-20, -10, -10, -5,  -5,  -10, -10, -20, -10, 0,  0, 0,   0,   0,	 0,   -10, -10, 0,   5,	  5,  5, 5,
+      0,   -10, -5,  0,	  5,   5,   5,	 5,   0,   -5, 0, 0,   5,   5,	 5,   5,   0,	-5,  -10, 5,  5, 5,
+      5,   5,	0,   -10, -10, 0,   5,	 0,   0,   0,  0, -10, -20, -10, -10, -5,  -5,	-10, -10, -20},
+     // rey (medio juego)
+     {-30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -30, -40, -40, -50, -50, -40,
+      -40, -30, -30, -40, -40, -50, -50, -40, -40, -30, -20, -30, -30, -40, -40, -30, -30, -20, -10, -20, -20, -20,
+      -20, -20, -20, -10, 20,  20,  0,	 0,   0,   0,	20,  20,  20,  30,  10,	 0,   0,   10,	30,  20}}};
 // funciones
 void printBitboard(bitboard bb);
 void initBoard(Tablero * t);
@@ -347,7 +346,7 @@ float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta)
 	if (depth == 0 || colorToMove.count == 0) {
 		return quiescence(t, c, alpha, beta, 4);
 	}
-	if (nodes % 131072 == 0) {
+	if (nodes % 1024 == 0) {
 		if (inputAvaliable()) {
 			char buffer[256];
 			if (fgets(buffer, sizeof(buffer), stdin)) {
@@ -442,7 +441,7 @@ moveScore negaMax(Tablero * t, color c, int timeLimit) {
 		Move localBestMove = bestMove;
 		float localBestScore = bestScore;
 		for (int i = 0; i < colorToMove.count; i++) {
-			if (nodes % 131072 == 0) {
+			if (nodes % 1024 == 0) {
 				if (inputAvaliable()) {
 					char buffer[256];
 					if (fgets(buffer, sizeof(buffer), stdin)) {
@@ -504,7 +503,7 @@ moveScore negaMaxFixedDepth(Tablero * t, color c, int depth) {
 	float beta = INFINITY;
 
 	for (int i = 0; i < colorToMove.count; i++) {
-		if (nodes % 131072 == 0) {
+		if (nodes % 1024 == 0) {
 			if (inputAvaliable()) {
 				char buffer[256];
 				if (fgets(buffer, sizeof(buffer), stdin)) {
@@ -1356,7 +1355,7 @@ float boardEval(Tablero * t, color c, int myMoveCount) {
 			positional -= positionalValues[!c][p][sq];
 		}
 	}
-	value += positional;
+	value += (10 * positional);
 
 	// Mobility: for the side to move, use provided count if available
 	int myMobility = myMoveCount;
@@ -1370,8 +1369,13 @@ float boardEval(Tablero * t, color c, int myMoveCount) {
 	generateAllPseudoMoves(!c, t, &oppMoves);
 	int oppMobility = oppMoves.count;
 
-	value += 10 * (myMobility - oppMobility);
+	value += 5 * (myMobility - oppMobility);
 
+	int kingSq = __builtin_ctzll(t->piezas[c][rey]);
+	bitboard kingZone = kingAttacks[kingSq] | BB_SQUARE(kingSq); // casillas alrededor
+	int attackers = __builtin_popcountll(kingZone & t->allPieces[!c]);
+	value -= attackers * 50; // fuerte penalización por atacantes cerca
+	//
 	return value;
 }
 void makeMove(Move * move, Tablero * t, color c) {
@@ -2044,7 +2048,14 @@ void proccesUCICommands(char command[256], Tablero * t) {
 
 		moveScore bestMove;
 		if (parameters.depth != -1) {
+			nodes = 0; // Reinicia contador
+			struct timespec start, end;
+			clock_gettime(CLOCK_MONOTONIC, &start);
 			bestMove = negaMaxFixedDepth(t, colorToMove, parameters.depth);
+			clock_gettime(CLOCK_MONOTONIC, &end);
+			double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+			double nps = nodes / elapsed;
+			printf("info nodes %lld time %.0f ms nps %.0f\n", nodes, elapsed * 1000, nps);
 		} else if (parameters.movetime != -1) {
 			bestMove = negaMax(t, colorToMove, parameters.movetime);
 		} else if (parameters.infinite) {
@@ -2061,6 +2072,8 @@ void proccesUCICommands(char command[256], Tablero * t) {
 			// Si no hay parámetros, go = infinito
 			bestMove = negaMax(t, colorToMove, -1);
 		}
+		printf("DEBUG: from=%d to=%d special=%d promo=%d\n", bestMove.move.from, bestMove.move.to,
+		       bestMove.move.special, bestMove.move.promoPiece);
 		printf("bestmove %s\n", moveToStr(&bestMove.move));
 		fflush(stdout);
 		return;
