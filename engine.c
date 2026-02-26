@@ -253,7 +253,7 @@ void generatePawnMoves(moveLists * ml, color c, Tablero * t);
 void generateRookMoves(moveLists * ml, color c, Tablero * t);
 void generateBishopMoves(moveLists * ml, color c, Tablero * t);
 void generateQueenMoves(moveLists * ml, color c, Tablero * t);
-float boardEval(Tablero * t, color c);
+float boardEval(Tablero * t, color c, int myMoveCount);
 void makeMove(Move * move, Tablero * t, color c);
 moveScore negaMax(Tablero * t, color c, int timeLimit);
 float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta);
@@ -276,6 +276,13 @@ void initZobrist();
 uint64_t computeZobrist(Zobrist * z, Tablero * t, color sideToMove);
 void testZobrist();
 void testTT();
+void generateAllPseudoMoves(color c, Tablero * t, moveLists * output);
+void generateRookCaptures(moveLists * ml, color c, Tablero * t);
+void generateBishopCaptures(moveLists * ml, color c, Tablero * t);
+void generateKnightCaptures(moveLists * ml, color c, Tablero * t);
+void generatePawnCaptures(moveLists * ml, color c, Tablero * t);
+void generateQueenCaptures(moveLists * ml, color c, Tablero * t);
+void generateKingCaptures(moveLists * ml, color c, Tablero * t);
 int main() {
 	setbuf(stdout, NULL);
 	initAttackTables();
@@ -330,7 +337,7 @@ float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta)
 		printf("DEBUG: recursiveNegaMax start, colorToMove = %d\n", c);
 	}
 	moveLists colorToMove = {0};
-	generateAllMoves(c, t, &colorToMove);
+	generateAllPseudoMoves(c, t, &colorToMove);
 	if (depth == 0 || colorToMove.count == 0) {
 		return quiescence(t, c, alpha, beta, 4);
 	}
@@ -349,6 +356,10 @@ float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta)
 		Tablero temp = *t;
 		Move move = moves[i].move;
 		makeMove(&move, &temp, c);
+		casilla king = __builtin_ctzll(temp.piezas[c][rey]);
+		if (isAttacked(&temp, king, !c)) {
+			continue;
+		}
 		float score = -recursiveNegaMax(depth - 1, &temp, !c, -beta, -alpha);
 		if (score > alpha) {
 			alpha = score;
@@ -407,7 +418,7 @@ moveScore negaMax(Tablero * t, color c, int timeLimit) {
 	if (colorToMove.count == 0) {
 		moveScore output = {
 		    .move = {0},
-		    .score = boardEval(t, c),
+		    .score = boardEval(t, c, -1),
 		};
 		if (debug) {
 			printf("DEBUG: board state\n");
@@ -468,7 +479,7 @@ moveScore negaMaxFixedDepth(Tablero * t, color c, int depth) {
 	generateAllMoves(c, t, &colorToMove);
 	memset(history, 0, sizeof(history));
 	if (colorToMove.count == 0) {
-		moveScore output = {.move = {0}, .score = boardEval(t, c)};
+		moveScore output = {.move = {0}, .score = boardEval(t, c, colorToMove.count)};
 		return output;
 	}
 
@@ -570,26 +581,24 @@ void generateAllMoves(color c, Tablero * t, moveLists * output) {
 		}
 	}
 }
+void generateAllPseudoMoves(color c, Tablero * t, moveLists * output) {
+	output->count = 0;
+	generateKingMoves(output, c, t);
+	generateKnightMoves(output, c, t);
+	generatePawnMoves(output, c, t);
+	generateRookMoves(output, c, t);
+	generateBishopMoves(output, c, t);
+	generateQueenMoves(output, c, t);
+}
 void generateCaptures(color c, Tablero * t, moveLists * output) {
 	output->count = 0;
-	moveLists temp = {0};
-	generateKingMoves(&temp, c, t);
-	generateKnightMoves(&temp, c, t);
-	generatePawnMoves(&temp, c, t);
-	generateRookMoves(&temp, c, t);
-	generateBishopMoves(&temp, c, t);
-	generateQueenMoves(&temp, c, t);
-	for (int i = 0; i < temp.count; i++) {
-		if (temp.moves[i].capture != 0) {
-			Tablero tempT = *t;
-			makeMove(&temp.moves[i], &tempT, c);
-			casilla king = __builtin_ctzll(tempT.piezas[c][rey]);
-			if (!isAttacked(&tempT, king, !c)) {
-				output->moves[output->count] = temp.moves[i];
-				output->count++;
-			}
-		}
-	}
+	generatePawnCaptures(output, c, t);
+	generateKnightCaptures(output, c, t);
+	generateBishopCaptures(output, c, t);
+	generateRookCaptures(output, c, t);
+	generateQueenCaptures(output, c, t);
+	generateKingCaptures(output, c, t);
+	// No legality test here – quiescence will test after making the move.
 }
 static inline bool isAttacked(Tablero * t, int square, color attackerColor) {
 	if (kingAttacks[square] & t->piezas[attackerColor][rey]) {
@@ -1296,27 +1305,22 @@ void generateQueenMoves(moveLists * ml, color c, Tablero * t) {
 		}
 	}
 }
-float boardEval(Tablero * t, color c) {
-	// queen = 9; rook = 5; bishop = 3; knight = 3; pawn = 1;
-	if (t->piezas[c][rey] == 0) {
+float boardEval(Tablero * t, color c, int myMoveCount) {
+	// Check for missing king (should not happen)
+	if (t->piezas[c][rey] == 0)
 		return 0;
-	};
-	casilla king = __builtin_ctzll(t->piezas[c][rey]);
-	moveLists movePerColor[2] = {0};
-	moveLists possibleMoves = {0};
-	generateAllMoves(c, t, &possibleMoves);
 
-	if (possibleMoves.count == 0) {
-		if (isAttacked(t, king, !c)) {
-			return -1.0f;
-		} else if (possibleMoves.count == 0) {
-			return 0.0f;
-		}
-	}
-	movePerColor[c] = possibleMoves;
-	generateAllMoves(!c, t, &movePerColor[!c]);
+	// Material and positional evaluation
+	float value =
+	    100 * (__builtin_popcountll(t->piezas[c][peon]) - __builtin_popcountll(t->piezas[!c][peon])) +
+	    300 * (__builtin_popcountll(t->piezas[c][caballo]) - __builtin_popcountll(t->piezas[!c][caballo])) +
+	    350 * (__builtin_popcountll(t->piezas[c][alfil]) - __builtin_popcountll(t->piezas[!c][alfil])) +
+	    500 * (__builtin_popcountll(t->piezas[c][torre]) - __builtin_popcountll(t->piezas[!c][torre])) +
+	    900 * (__builtin_popcountll(t->piezas[c][reina]) - __builtin_popcountll(t->piezas[!c][reina]));
+
+	// Positional bonus
 	float positional = 0;
-	for (tipoDePieza p = 0; p <= rey; p++) {
+	for (tipoDePieza p = peon; p <= rey; p++) {
 		bitboard pieces = t->piezas[c][p];
 		while (pieces) {
 			int sq = __builtin_ctzll(pieces);
@@ -1324,7 +1328,7 @@ float boardEval(Tablero * t, color c) {
 			positional += positionalValues[c][p][sq];
 		}
 	}
-	for (tipoDePieza p = 0; p <= rey; p++) {
+	for (tipoDePieza p = peon; p <= rey; p++) {
 		bitboard pieces = t->piezas[!c][p];
 		while (pieces) {
 			int sq = __builtin_ctzll(pieces);
@@ -1332,18 +1336,22 @@ float boardEval(Tablero * t, color c) {
 			positional -= positionalValues[!c][p][sq];
 		}
 	}
-
-	float value =
-	    100 * (__builtin_popcountll(t->piezas[c][peon]) - __builtin_popcountll(t->piezas[!c][peon])) +
-	    300 * (__builtin_popcountll(t->piezas[c][caballo]) - __builtin_popcountll(t->piezas[!c][caballo])) +
-	    350 * (__builtin_popcountll(t->piezas[c][alfil]) - __builtin_popcountll(t->piezas[!c][alfil])) +
-	    500 * (__builtin_popcountll(t->piezas[c][torre]) - __builtin_popcountll(t->piezas[!c][torre])) +
-	    900 * (__builtin_popcountll(t->piezas[c][reina]) - __builtin_popcountll(t->piezas[!c][reina])) +
-	    10 * (movePerColor[c].count - movePerColor[!c].count);
 	value += positional;
-	if (debug) {
-		printf("%f\n", value);
+
+	// Mobility: for the side to move, use provided count if available
+	int myMobility = myMoveCount;
+	if (myMobility == -1) {
+		moveLists moves;
+		generateAllMoves(c, t, &moves);
+		myMobility = moves.count;
 	}
+	// Always generate opponent's moves for mobility
+	moveLists oppMoves;
+	generateAllMoves(!c, t, &oppMoves);
+	int oppMobility = oppMoves.count;
+
+	value += 10 * (myMobility - oppMobility);
+
 	return value;
 }
 void makeMove(Move * move, Tablero * t, color c) {
@@ -2028,18 +2036,18 @@ static inline int compareMoveSort(const void * a, const void * b) {
 	return mb->sortingScore - ma->sortingScore;
 }
 float quiescence(Tablero * t, color c, float alpha, float beta, int qdepth) {
+	moveLists captures = {0};
+	generateCaptures(c, t, &captures);
 	if (qdepth <= 0) {
-		return boardEval(t, c);
+		return boardEval(t, c, captures.count);
 	}
-	float standPat = boardEval(t, c); // current evaluation
+	float standPat = boardEval(t, c, captures.count); // current evaluation
 	if (standPat >= beta) {
 		return beta;
 	}
 	if (standPat > alpha) {
 		alpha = standPat;
 	}
-	moveLists captures = {0};
-	generateCaptures(c, t, &captures);
 	moveSort moves[256];
 	moveToMoveSort(&captures, moves, 0);
 	qsort(moves, captures.count, sizeof(moveSort), compareMoveSort);
@@ -2047,6 +2055,10 @@ float quiescence(Tablero * t, color c, float alpha, float beta, int qdepth) {
 	for (int i = 0; i < captures.count; i++) {
 		Tablero temp = *t;
 		makeMove(&captures.moves[i], &temp, c);
+		casilla king = __builtin_ctzll(temp.piezas[c][rey]);
+		if (isAttacked(t, king, !c)) {
+			continue;
+		}
 		float score = -quiescence(&temp, !c, -beta, -alpha, qdepth - 1);
 		if (score >= beta)
 			return beta;
@@ -2275,4 +2287,183 @@ void testTT() {
 	clock_gettime(CLOCK_MONOTONIC, &end);
 	double elapsed2 = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
 	printf("Second: nodes %lld time %.3f s nps %.0f\n", nodes, elapsed2, nodes / elapsed2);
+}
+void generateRookCaptures(moveLists * ml, color c, Tablero * t) {
+	bitboard allRooks = t->piezas[c][torre];
+	while (allRooks) {
+		casilla from = __builtin_ctzll(allRooks);
+		allRooks &= allRooks - 1;
+		for (int i = 0; i < 4; i++) {
+			bitboard ray = rookMask[from][i];
+			bitboard blockers = ray & t->allOccupiedSquares;
+			if (blockers) {
+				int blockerSq;
+				if (i < 2)
+					blockerSq = __builtin_ctzll(blockers);
+				else
+					blockerSq = 63 - __builtin_clzll(blockers);
+				// Only consider the blocker if it's an enemy piece (capture)
+				if (BB_SQUARE(blockerSq) & t->allPieces[!c]) {
+					int capture = -1;
+					for (int p = peon; p <= rey; p++) {
+						if (t->piezas[!c][p] & BB_SQUARE(blockerSq)) {
+							capture = p;
+							break;
+						}
+					}
+					Move move = {from, blockerSq, torre, capture, 0, 0};
+					ml->moves[ml->count++] = move;
+				}
+			}
+		}
+	}
+}
+void generateBishopCaptures(moveLists * ml, color c, Tablero * t) {
+	bitboard allBishops = t->piezas[c][alfil];
+	while (allBishops) {
+		casilla from = __builtin_ctzll(allBishops);
+		allBishops &= allBishops - 1;
+		for (int i = 0; i < 4; i++) {
+			bitboard ray = bishopMask[from][i];
+			bitboard blockers = ray & t->allOccupiedSquares;
+			if (blockers) {
+				int blockerSq;
+				if (i < 2)
+					blockerSq = __builtin_ctzll(blockers);
+				else
+					blockerSq = 63 - __builtin_clzll(blockers);
+				// Only consider the blocker if it's an enemy piece (capture)
+				if (BB_SQUARE(blockerSq) & t->allPieces[!c]) {
+					int capture = -1;
+					for (int p = peon; p <= rey; p++) {
+						if (t->piezas[!c][p] & BB_SQUARE(blockerSq)) {
+							capture = p;
+							break;
+						}
+					}
+					Move move = {from, blockerSq, alfil, capture, 0, 0};
+					ml->moves[ml->count++] = move;
+				}
+			}
+		}
+	}
+}
+void generateKnightCaptures(moveLists * ml, color c, Tablero * t) {
+	bitboard allKnights = t->piezas[c][caballo];
+	while (allKnights) {
+		casilla from = __builtin_ctzll(allKnights);
+		allKnights &= allKnights - 1;
+		bitboard attacks = knightAttacks[from];
+		while (attacks) {
+			casilla to = __builtin_ctzll(attacks);
+			attacks &= attacks - 1;
+			if (BB_SQUARE(to) & t->allPieces[!c]) {
+				int capture = -1;
+				for (int p = peon; p <= rey; p++) {
+					if (t->piezas[!c][p] & BB_SQUARE(to)) {
+						capture = p;
+						break;
+					}
+				}
+				Move move = {from, to, caballo, capture, 0, 0};
+				ml->moves[ml->count++] = move;
+			}
+		}
+	}
+}
+void generatePawnCaptures(moveLists * ml, color c, Tablero * t) {
+	bitboard allPawns = t->piezas[c][peon];
+	while (allPawns) {
+		casilla from = __builtin_ctzll(allPawns);
+		allPawns &= allPawns - 1;
+		bitboard attacks = pawnAttacks[c][from] & t->allPieces[!c];
+		while (attacks) {
+			casilla to = __builtin_ctzll(attacks);
+			attacks &= attacks - 1;
+			int capture = -1;
+			for (int p = peon; p <= rey; p++) {
+				if (t->piezas[!c][p] & BB_SQUARE(to)) {
+					capture = p;
+					break;
+				}
+			}
+			Move move = {from, to, peon, capture, 0, 0};
+			ml->moves[ml->count++] = move;
+		}
+	}
+}
+void generateQueenCaptures(moveLists * ml, color c, Tablero * t) {
+	bitboard allQueens = t->piezas[c][reina];
+	while (allQueens) {
+		casilla from = __builtin_ctzll(allQueens);
+		allQueens &= allQueens - 1;
+		// Rook directions
+		for (int i = 0; i < 4; i++) {
+			bitboard ray = rookMask[from][i];
+			bitboard blockers = ray & t->allOccupiedSquares;
+			if (blockers) {
+				int blockerSq;
+				if (i < 2)
+					blockerSq = __builtin_ctzll(blockers);
+				else
+					blockerSq = 63 - __builtin_clzll(blockers);
+				if (BB_SQUARE(blockerSq) & t->allPieces[!c]) {
+					int capture = -1;
+					for (int p = peon; p <= rey; p++) {
+						if (t->piezas[!c][p] & BB_SQUARE(blockerSq)) {
+							capture = p;
+							break;
+						}
+					}
+					Move move = {from, blockerSq, reina, capture, 0, 0};
+					ml->moves[ml->count++] = move;
+				}
+			}
+		}
+		// Bishop directions
+		for (int i = 0; i < 4; i++) {
+			bitboard ray = bishopMask[from][i];
+			bitboard blockers = ray & t->allOccupiedSquares;
+			if (blockers) {
+				int blockerSq;
+				if (i > 1)
+					blockerSq = __builtin_ctzll(blockers);
+				else
+					blockerSq = 63 - __builtin_clzll(blockers);
+				if (BB_SQUARE(blockerSq) & t->allPieces[!c]) {
+					int capture = -1;
+					for (int p = peon; p <= rey; p++) {
+						if (t->piezas[!c][p] & BB_SQUARE(blockerSq)) {
+							capture = p;
+							break;
+						}
+					}
+					Move move = {from, blockerSq, reina, capture, 0, 0};
+					ml->moves[ml->count++] = move;
+				}
+			}
+		}
+	}
+}
+void generateKingCaptures(moveLists * ml, color c, Tablero * t) {
+	bitboard king = t->piezas[c][rey];
+	if (!king)
+		return;
+	casilla from = __builtin_ctzll(king);
+	bitboard attacks = kingAttacks[from] & ~t->allPieces[c];
+	while (attacks) {
+		casilla to = __builtin_ctzll(attacks);
+		attacks &= attacks - 1;
+		if (BB_SQUARE(to) & t->allPieces[!c]) {
+			int capture = -1;
+			for (int p = peon; p <= rey; p++) {
+				if (t->piezas[!c][p] & BB_SQUARE(to)) {
+					capture = p;
+					break;
+				}
+			}
+			Move move = {from, to, rey, capture, 0, 0};
+			ml->moves[ml->count++] = move;
+		}
+	}
 }
