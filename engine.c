@@ -2122,6 +2122,7 @@ void proccesUCICommands(char command[4096], Tablero * t) {
 		if (debug) {
 			printf("DEBUG: from=%d to=%d special=%d promo=%d\n", bestMove.move.from, bestMove.move.to,
 			       bestMove.move.special, bestMove.move.promoPiece);
+			// a
 		}
 		printf("bestmove %s\n", moveToStr(&bestMove.move));
 		fflush(stdout);
