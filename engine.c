@@ -298,7 +298,7 @@ int main() {
 	*/
 	while (true) {
 		if (inputAvaliable()) {
-			char buffer[256];
+			char buffer[4096];
 			if (fgets(buffer, sizeof(buffer), stdin)) {
 				proccesUCICommands(buffer, &tablero);
 			}
@@ -1760,7 +1760,7 @@ bool inputAvaliable() {
 	int ret = select(1, &fds, NULL, NULL, &tv);
 	return (ret > 0);
 }
-void proccesUCICommands(char command[256], Tablero * t) {
+void proccesUCICommands(char command[4096], Tablero * t) {
 	char * nl = strchr(command, '\n');
 	if (nl)
 		*nl = '\0';
