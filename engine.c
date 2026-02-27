@@ -256,7 +256,7 @@ float boardEval(Tablero * t, color c, int myMoveCount);
 void makeMove(Move * move, Tablero * t, color c);
 moveScore negaMax(Tablero * t, color c, int timeLimit);
 float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta);
-void proccesUCICommands(char command[256], Tablero * t);
+void proccesUCICommands(char command[4096], Tablero * t);
 bool inputAvaliable();
 static inline tipoDePieza charToPiece(char c);
 static inline casilla stringToSq(const char * sq);
@@ -344,12 +344,21 @@ float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta)
 	}
 	moveLists colorToMove = {0};
 	generateAllPseudoMoves(c, t, &colorToMove);
-	if (depth == 0 || colorToMove.count == 0) {
+	if (colorToMove.count == 0) {
+		casilla kingSq = __builtin_ctzll(t->piezas[c][rey]);
+		if (isAttacked(t, kingSq, !c)) {
+			float value = (2 ^ 128) * -1;
+			return value;
+		} else {
+			return 0;
+		}
+	}
+	if (depth == 0) {
 		return quiescence(t, c, alpha, beta, 4);
 	}
 	if (nodes % 1024 == 0) {
 		if (inputAvaliable()) {
-			char buffer[256];
+			char buffer[4096];
 			if (fgets(buffer, sizeof(buffer), stdin)) {
 				proccesUCICommands(buffer, t);
 			}
@@ -444,7 +453,7 @@ moveScore negaMax(Tablero * t, color c, int timeLimit) {
 		for (int i = 0; i < colorToMove.count; i++) {
 			if (nodes % 1024 == 0) {
 				if (inputAvaliable()) {
-					char buffer[256];
+					char buffer[4096];
 					if (fgets(buffer, sizeof(buffer), stdin)) {
 						proccesUCICommands(buffer, t);
 					}
@@ -506,7 +515,7 @@ moveScore negaMaxFixedDepth(Tablero * t, color c, int depth) {
 	for (int i = 0; i < colorToMove.count; i++) {
 		if (nodes % 1024 == 0) {
 			if (inputAvaliable()) {
-				char buffer[256];
+				char buffer[4096];
 				if (fgets(buffer, sizeof(buffer), stdin)) {
 					proccesUCICommands(buffer, t);
 				}
@@ -1328,7 +1337,6 @@ void generateQueenMoves(moveLists * ml, color c, Tablero * t) {
 float boardEval(Tablero * t, color c, int myMoveCount) {
 	if (t->piezas[c][rey] == 0)
 		return 0;
-
 	float value =
 	    100 * (__builtin_popcountll(t->piezas[c][peon]) - __builtin_popcountll(t->piezas[!c][peon])) +
 	    300 * (__builtin_popcountll(t->piezas[c][caballo]) - __builtin_popcountll(t->piezas[!c][caballo])) +
@@ -1344,9 +1352,7 @@ float boardEval(Tablero * t, color c, int myMoveCount) {
 			pieces &= pieces - 1;
 			positional += positionalValues[c][p][sq];
 		}
-	}
-	for (tipoDePieza p = peon; p <= rey; p++) {
-		bitboard pieces = t->piezas[!c][p];
+		pieces = t->piezas[!c][p];
 		while (pieces) {
 			int sq = __builtin_ctzll(pieces);
 			pieces &= pieces - 1;
@@ -1364,48 +1370,128 @@ float boardEval(Tablero * t, color c, int myMoveCount) {
 	moveLists oppMoves;
 	generateAllPseudoMoves(!c, t, &oppMoves);
 	int oppMobility = oppMoves.count;
-
 	value += 10 * (myMobility - oppMobility);
 
 	int kingSq = __builtin_ctzll(t->piezas[c][rey]);
 	bitboard kingZone = kingAttacks[kingSq] | BB_SQUARE(kingSq);
 	int attackers = __builtin_popcountll(kingZone & t->allPieces[!c]);
-	value -= attackers * 50;
+	value -= attackers * 80;
+
+	if (c == blancas) {
+		if (!(t->castlingRights & (WHITE_OO | WHITE_OOO)))
+			value += 60;
+		else if ((t->castlingRights & (WHITE_OO | WHITE_OOO)))
+			value -= 30;
+	} else {
+		if (!(t->castlingRights & (BLACK_OO | BLACK_OOO)))
+			value += 60;
+		else if ((t->castlingRights & (BLACK_OO | BLACK_OOO)))
+			value -= 30;
+	}
 
 	int development = 0;
-	if (!(t->piezas[c][caballo] & BB_SQUARE(b1)) && c == blancas)
-		development += 20;
-	if (!(t->piezas[c][caballo] & BB_SQUARE(g1)) && c == blancas)
-		development += 20;
-	if (!(t->piezas[c][alfil] & BB_SQUARE(c1)) && c == blancas)
-		development += 20;
-	if (!(t->piezas[c][alfil] & BB_SQUARE(f1)) && c == blancas)
-		development += 20;
-
-	if (!(t->piezas[!c][caballo] & BB_SQUARE(b8)) && c == blancas)
-		development -= 20;
-	if (!(t->piezas[!c][caballo] & BB_SQUARE(g8)) && c == blancas)
-		development -= 20;
-	if (!(t->piezas[!c][alfil] & BB_SQUARE(c8)) && c == blancas)
-		development -= 20;
-	if (!(t->piezas[!c][alfil] & BB_SQUARE(f8)) && c == blancas)
-		development -= 20;
-
-	if ((t->castlingRights & (WHITE_OO | WHITE_OOO)) && c == blancas)
-		development -= 10;
-	if ((t->castlingRights & (BLACK_OO | BLACK_OOO)) && c == blancas)
-		development += 10;
+	if (c == blancas) {
+		if (!(t->piezas[c][caballo] & BB_SQUARE(b1)))
+			development += 30;
+		if (!(t->piezas[c][caballo] & BB_SQUARE(g1)))
+			development += 30;
+		if (!(t->piezas[c][alfil] & BB_SQUARE(c1)))
+			development += 30;
+		if (!(t->piezas[c][alfil] & BB_SQUARE(f1)))
+			development += 30;
+	} else {
+		if (!(t->piezas[c][caballo] & BB_SQUARE(b8)))
+			development += 30;
+		if (!(t->piezas[c][caballo] & BB_SQUARE(g8)))
+			development += 30;
+		if (!(t->piezas[c][alfil] & BB_SQUARE(c8)))
+			development += 30;
+		if (!(t->piezas[c][alfil] & BB_SQUARE(f8)))
+			development += 30;
+	}
+	if (c == blancas) {
+		if (!(t->piezas[!c][caballo] & BB_SQUARE(b8)))
+			development -= 30;
+		if (!(t->piezas[!c][caballo] & BB_SQUARE(g8)))
+			development -= 30;
+		if (!(t->piezas[!c][alfil] & BB_SQUARE(c8)))
+			development -= 30;
+		if (!(t->piezas[!c][alfil] & BB_SQUARE(f8)))
+			development -= 30;
+	} else {
+		if (!(t->piezas[!c][caballo] & BB_SQUARE(b1)))
+			development -= 30;
+		if (!(t->piezas[!c][caballo] & BB_SQUARE(g1)))
+			development -= 30;
+		if (!(t->piezas[!c][alfil] & BB_SQUARE(c1)))
+			development -= 30;
+		if (!(t->piezas[!c][alfil] & BB_SQUARE(f1)))
+			development -= 30;
+	}
 	value += development;
 
 	int pawnStruct = 0;
 	for (int file = 0; file < 8; file++) {
 		int countOwn = __builtin_popcountll(t->piezas[c][peon] & BB_FILE(file));
 		if (countOwn > 1)
-			pawnStruct -= (countOwn - 1) * 15;
-
+			pawnStruct -= (countOwn - 1) * 25;
 		int countOpp = __builtin_popcountll(t->piezas[!c][peon] & BB_FILE(file));
 		if (countOpp > 1)
-			pawnStruct += (countOpp - 1) * 15;
+			pawnStruct += (countOpp - 1) * 25;
+	}
+	for (int file = 0; file < 8; file++) {
+		if (t->piezas[c][peon] & BB_FILE(file)) {
+			int left = (file > 0) ? (t->piezas[c][peon] & BB_FILE(file - 1)) : 0;
+			int right = (file < 7) ? (t->piezas[c][peon] & BB_FILE(file + 1)) : 0;
+			if (!left && !right)
+				pawnStruct -= 20 * __builtin_popcountll(t->piezas[c][peon] & BB_FILE(file));
+		}
+		if (t->piezas[!c][peon] & BB_FILE(file)) {
+			int left = (file > 0) ? (t->piezas[!c][peon] & BB_FILE(file - 1)) : 0;
+			int right = (file < 7) ? (t->piezas[!c][peon] & BB_FILE(file + 1)) : 0;
+			if (!left && !right)
+				pawnStruct += 20 * __builtin_popcountll(t->piezas[!c][peon] & BB_FILE(file));
+		}
+	}
+	for (int file = 0; file < 8; file++) {
+		bitboard ownPawnsFile = t->piezas[c][peon] & BB_FILE(file);
+		bitboard oppPawnsFile = t->piezas[!c][peon] & BB_FILE(file);
+		while (ownPawnsFile) {
+			int sq = __builtin_ctzll(ownPawnsFile);
+			ownPawnsFile &= ownPawnsFile - 1;
+			int rank = sq / 8;
+			int passed = 1;
+			for (int f = (file > 0 ? file - 1 : file); f <= (file < 7 ? file + 1 : file); f++) {
+				if (t->piezas[!c][peon] & BB_FILE(f) &
+				    (c == blancas ? (C64(0xFF) << ((rank + 1) * 8))
+						  : (C64(0xFF) >> ((7 - rank) * 8)))) {
+					passed = 0;
+					break;
+				}
+			}
+			if (passed) {
+				int bonus = 30 + (c == blancas ? rank * 5 : (7 - rank) * 5);
+				pawnStruct += bonus;
+			}
+		}
+		while (oppPawnsFile) {
+			int sq = __builtin_ctzll(oppPawnsFile);
+			oppPawnsFile &= oppPawnsFile - 1;
+			int rank = sq / 8;
+			int passed = 1;
+			for (int f = (file > 0 ? file - 1 : file); f <= (file < 7 ? file + 1 : file); f++) {
+				if (t->piezas[c][peon] & BB_FILE(f) &
+				    (c == blancas ? (C64(0xFF) >> ((7 - rank) * 8))
+						  : (C64(0xFF) << ((rank + 1) * 8)))) {
+					passed = 0;
+					break;
+				}
+			}
+			if (passed) {
+				int bonus = 30 + (c == blancas ? (7 - rank) * 5 : rank * 5);
+				pawnStruct -= bonus;
+			}
+		}
 	}
 	value += pawnStruct;
 
@@ -1413,15 +1499,44 @@ float boardEval(Tablero * t, color c, int myMoveCount) {
 	for (int file = 0; file < 8; file++) {
 		bitboard fileMask = BB_FILE(file);
 		if (!(t->piezas[c][peon] & fileMask)) {
-			if (t->piezas[c][torre] & fileMask)
-				rookBonus += 30;
+			bitboard rooks = t->piezas[c][torre] & fileMask;
+			rookBonus += __builtin_popcountll(rooks) * 30;
 		}
 		if (!(t->piezas[!c][peon] & fileMask)) {
-			if (t->piezas[!c][torre] & fileMask)
-				rookBonus -= 30;
+			bitboard rooks = t->piezas[!c][torre] & fileMask;
+			rookBonus -= __builtin_popcountll(rooks) * 30;
 		}
 	}
+	if (c == blancas) {
+		bitboard seventh = RANK(6);
+		int ownRooks7 = __builtin_popcountll(t->piezas[c][torre] & seventh);
+		rookBonus += ownRooks7 * 30;
+		int oppRooks2 = __builtin_popcountll(t->piezas[!c][torre] & RANK(1));
+		rookBonus -= oppRooks2 * 30;
+	} else {
+		bitboard second = RANK(1);
+		int ownRooks2 = __builtin_popcountll(t->piezas[c][torre] & second);
+		rookBonus += ownRooks2 * 30;
+		int oppRooks7 = __builtin_popcountll(t->piezas[!c][torre] & RANK(6));
+		rookBonus -= oppRooks7 * 30;
+	}
 	value += rookBonus;
+
+	int bishopPair = 0;
+	if (__builtin_popcountll(t->piezas[c][alfil]) >= 2)
+		bishopPair += 30;
+	if (__builtin_popcountll(t->piezas[!c][alfil]) >= 2)
+		bishopPair -= 30;
+	value += bishopPair;
+
+	bitboard center = BB_SQUARE(d4) | BB_SQUARE(e4) | BB_SQUARE(d5) | BB_SQUARE(e5);
+	int centerControl = 0;
+	for (tipoDePieza p = peon; p <= reina; p++) {
+		int weight = (p == peon) ? 10 : (p == caballo || p == alfil) ? 20 : 15;
+		centerControl += __builtin_popcountll(t->piezas[c][p] & center) * weight;
+		centerControl -= __builtin_popcountll(t->piezas[!c][p] & center) * weight;
+	}
+	value += centerControl;
 
 	return value;
 }
@@ -2122,7 +2237,6 @@ void proccesUCICommands(char command[4096], Tablero * t) {
 		if (debug) {
 			printf("DEBUG: from=%d to=%d special=%d promo=%d\n", bestMove.move.from, bestMove.move.to,
 			       bestMove.move.special, bestMove.move.promoPiece);
-			// a
 		}
 		printf("bestmove %s\n", moveToStr(&bestMove.move));
 		fflush(stdout);
