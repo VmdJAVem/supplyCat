@@ -286,6 +286,7 @@ void generateQueenCaptures(moveLists * ml, color c, Tablero * t);
 void generateKingCaptures(moveLists * ml, color c, Tablero * t);
 bool testUnmakeMove(Tablero * original, Move move, color c);
 void testUnmakeAll();
+static inline bitboard BB_FILE(int file);
 int main() {
 	setbuf(stdout, NULL); // Desactiva el buffering de stdout
 	setbuf(stdin, NULL);
@@ -1325,11 +1326,9 @@ void generateQueenMoves(moveLists * ml, color c, Tablero * t) {
 	}
 }
 float boardEval(Tablero * t, color c, int myMoveCount) {
-	// Check for missing king (should not happen)
 	if (t->piezas[c][rey] == 0)
 		return 0;
 
-	// Material and positional evaluation
 	float value =
 	    100 * (__builtin_popcountll(t->piezas[c][peon]) - __builtin_popcountll(t->piezas[!c][peon])) +
 	    300 * (__builtin_popcountll(t->piezas[c][caballo]) - __builtin_popcountll(t->piezas[!c][caballo])) +
@@ -1337,7 +1336,6 @@ float boardEval(Tablero * t, color c, int myMoveCount) {
 	    500 * (__builtin_popcountll(t->piezas[c][torre]) - __builtin_popcountll(t->piezas[!c][torre])) +
 	    900 * (__builtin_popcountll(t->piezas[c][reina]) - __builtin_popcountll(t->piezas[!c][reina]));
 
-	// Positional bonus
 	float positional = 0;
 	for (tipoDePieza p = peon; p <= rey; p++) {
 		bitboard pieces = t->piezas[c][p];
@@ -1357,14 +1355,12 @@ float boardEval(Tablero * t, color c, int myMoveCount) {
 	}
 	value += (10 * positional);
 
-	// Mobility: for the side to move, use provided count if available
 	int myMobility = myMoveCount;
 	if (myMobility == -1) {
 		moveLists moves;
 		generateAllPseudoMoves(c, t, &moves);
 		myMobility = moves.count;
 	}
-	// Always generate opponent's moves for mobility
 	moveLists oppMoves;
 	generateAllPseudoMoves(!c, t, &oppMoves);
 	int oppMobility = oppMoves.count;
@@ -1372,10 +1368,61 @@ float boardEval(Tablero * t, color c, int myMoveCount) {
 	value += 5 * (myMobility - oppMobility);
 
 	int kingSq = __builtin_ctzll(t->piezas[c][rey]);
-	bitboard kingZone = kingAttacks[kingSq] | BB_SQUARE(kingSq); // casillas alrededor
+	bitboard kingZone = kingAttacks[kingSq] | BB_SQUARE(kingSq);
 	int attackers = __builtin_popcountll(kingZone & t->allPieces[!c]);
-	value -= attackers * 50; // fuerte penalización por atacantes cerca
-	//
+	value -= attackers * 50;
+
+	int development = 0;
+	if (!(t->piezas[c][caballo] & BB_SQUARE(b1)) && c == blancas)
+		development += 20;
+	if (!(t->piezas[c][caballo] & BB_SQUARE(g1)) && c == blancas)
+		development += 20;
+	if (!(t->piezas[c][alfil] & BB_SQUARE(c1)) && c == blancas)
+		development += 20;
+	if (!(t->piezas[c][alfil] & BB_SQUARE(f1)) && c == blancas)
+		development += 20;
+
+	if (!(t->piezas[!c][caballo] & BB_SQUARE(b8)) && c == blancas)
+		development -= 20;
+	if (!(t->piezas[!c][caballo] & BB_SQUARE(g8)) && c == blancas)
+		development -= 20;
+	if (!(t->piezas[!c][alfil] & BB_SQUARE(c8)) && c == blancas)
+		development -= 20;
+	if (!(t->piezas[!c][alfil] & BB_SQUARE(f8)) && c == blancas)
+		development -= 20;
+
+	if ((t->castlingRights & (WHITE_OO | WHITE_OOO)) && c == blancas)
+		development -= 10;
+	if ((t->castlingRights & (BLACK_OO | BLACK_OOO)) && c == blancas)
+		development += 10;
+	value += development;
+
+	int pawnStruct = 0;
+	for (int file = 0; file < 8; file++) {
+		int countOwn = __builtin_popcountll(t->piezas[c][peon] & BB_FILE(file));
+		if (countOwn > 1)
+			pawnStruct -= (countOwn - 1) * 15;
+
+		int countOpp = __builtin_popcountll(t->piezas[!c][peon] & BB_FILE(file));
+		if (countOpp > 1)
+			pawnStruct += (countOpp - 1) * 15;
+	}
+	value += pawnStruct;
+
+	int rookBonus = 0;
+	for (int file = 0; file < 8; file++) {
+		bitboard fileMask = BB_FILE(file);
+		if (!(t->piezas[c][peon] & fileMask)) {
+			if (t->piezas[c][torre] & fileMask)
+				rookBonus += 30;
+		}
+		if (!(t->piezas[!c][peon] & fileMask)) {
+			if (t->piezas[!c][torre] & fileMask)
+				rookBonus -= 30;
+		}
+	}
+	value += rookBonus;
+
 	return value;
 }
 void makeMove(Move * move, Tablero * t, color c) {
@@ -2736,3 +2783,4 @@ void testUnmakeAll() {
 
 	printf("All unmakeMove tests completed.\n");
 }
+static inline bitboard BB_FILE(int file) { return (C64(0x0101010101010101) << file); }
