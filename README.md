@@ -1,4 +1,6 @@
 Supplycat
 =========
 
-Chess engine built by a hobbyist self-taught 13 year old.
+*pretty bad* UCI chess engine built by me (don't expect support!).
+
+![preview.mp4](The engine Playing against itself)
