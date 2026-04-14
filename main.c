@@ -17,6 +17,7 @@ typedef uint64_t bitboard;
 #define RANK(r) (C64(0xFF) << (8 * (r)))
 #define C8 ((uint8_t)123)
 #define MAX_DEPTH 128
+#define MATE_SCORE 100000
 // enums
 typedef enum { blancas, negras } color;
 typedef enum { peon, caballo, alfil, torre, reina, rey } tipoDePieza;
@@ -174,6 +175,9 @@ color colorToMove;
 bool debug = false;
 Move killerMoves[MAX_DEPTH][2] = {0};
 int history[64][64] = {0};
+#define MAX_GAME_LENGTH 1024
+uint64_t positionHashes[MAX_GAME_LENGTH] = {0};
+int positionHashCount = 0;
 Zobrist zobrist;
 goParameters parameters = {
     .wtime = -1,
@@ -265,8 +269,6 @@ static inline char pieceToChar(tipoDePieza piece);
 static inline char * moveToStr(Move * move);
 moveScore negaMaxFixedDepth(Tablero * t, color c, int depth);
 static inline bool isEqualMoves(Move * x, Move * y);
-static inline int partition(moveSort arr[], int low, int high);
-static inline void swapMoveSort(moveSort * a, moveSort * b);
 static inline void moveToMoveSort(moveLists * input, moveSort output[], int depth);
 moveSort scoreMoveForSorting(Move * move, int depth);
 static inline int compareMoveSort(const void * a, const void * b);
@@ -325,6 +327,17 @@ void printBitboard(bitboard bb) {
 }
 
 static long long int TThits = 0, TTmisses = 0;
+
+bool isRepetition(uint64_t hash) {
+	for (int i = positionHashCount - 2; i >= 0; i -= 2) {
+		if (positionHashes[i] == hash)
+			return true;
+		if (i == 0)
+			break;
+	}
+	return false;
+}
+
 float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta) {
 	nodes++;
 	int index = t->hash & TT_MASK;
@@ -344,6 +357,10 @@ float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta)
 	}
 	if (stopRequested)
 		return 0;
+	if (t->halfmoveClock >= 100)
+		return 0;
+	if (isRepetition(t->hash))
+		return 0;
 	float oldAlpha = alpha;
 	if (debug) {
 		printf("DEBUG: recursiveNegaMax start, colorToMove = %d\n", c);
@@ -353,8 +370,7 @@ float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta)
 	if (colorToMove.count == 0) {
 		casilla kingSq = __builtin_ctzll(t->piezas[c][rey]);
 		if (isAttacked(t, kingSq, !c)) {
-			float value = (2 ^ 128) * -1;
-			return value;
+			return -MATE_SCORE;
 		} else {
 			return 0;
 		}
@@ -385,7 +401,9 @@ float recursiveNegaMax(int depth, Tablero * t, color c, float alpha, float beta)
 			unmakeMove(&move, t, c, oldEp, oldCastling, oldHalf, oldFull);
 			continue;
 		}
+		positionHashes[positionHashCount++] = t->hash;
 		float score = -recursiveNegaMax(depth - 1, t, !c, -beta, -alpha);
+		positionHashCount--;
 		unmakeMove(&move, t, c, oldEp, oldCastling, oldHalf, oldFull);
 		if (score > alpha) {
 			alpha = score;
@@ -442,9 +460,16 @@ moveScore negaMax(Tablero * t, color c, int timeLimit) {
 	struct timespec start;
 	clock_gettime(CLOCK_MONOTONIC, &start);
 	if (colorToMove.count == 0) {
+		casilla kingSq = __builtin_ctzll(t->piezas[c][rey]);
+		float score;
+		if (isAttacked(t, kingSq, !c)) {
+			score = -MATE_SCORE;
+		} else {
+			score = 0;
+		}
 		moveScore output = {
 		    .move = {0},
-		    .score = boardEval(t, c, -1),
+		    .score = score,
 		};
 		if (debug) {
 			printf("DEBUG: board state\n");
@@ -472,7 +497,9 @@ moveScore negaMax(Tablero * t, color c, int timeLimit) {
 			int oldHalf = t->halfmoveClock;
 			int oldFull = t->fullMoves;
 			makeMove(&colorToMove.moves[i], t, c);
+			positionHashes[positionHashCount++] = t->hash;
 			float score = -recursiveNegaMax(depth, t, !c, -beta, -alpha);
+			positionHashCount--;
 			unmakeMove(&colorToMove.moves[i], t, c, oldEp, oldCastling, oldHalf, oldFull);
 			if (score > localBestScore) {
 				localBestScore = score;
@@ -517,7 +544,14 @@ moveScore negaMaxFixedDepth(Tablero * t, color c, int depth) {
 	generateAllMoves(c, t, &colorToMove);
 	memset(history, 0, sizeof(history));
 	if (colorToMove.count == 0) {
-		moveScore output = {.move = {0}, .score = boardEval(t, c, colorToMove.count)};
+		casilla kingSq = __builtin_ctzll(t->piezas[c][rey]);
+		float score;
+		if (isAttacked(t, kingSq, !c)) {
+			score = -MATE_SCORE;
+		} else {
+			score = 0;
+		}
+		moveScore output = {.move = {0}, .score = score};
 		return output;
 	}
 
@@ -542,7 +576,9 @@ moveScore negaMaxFixedDepth(Tablero * t, color c, int depth) {
 		int oldHalf = t->halfmoveClock;
 		int oldFull = t->fullMoves;
 		makeMove(&colorToMove.moves[i], t, c);
+		positionHashes[positionHashCount++] = t->hash;
 		float score = -recursiveNegaMax(depth - 1, t, !c, -beta, -alpha);
+		positionHashCount--;
 		unmakeMove(&colorToMove.moves[i], t, c, oldEp, oldCastling, oldHalf, oldFull);
 
 		if (score > bestScore) {
@@ -1521,7 +1557,8 @@ void makeMove(Move * move, Tablero * t, color c) {
 			}
 
 			// Set en passant square if double pawn push
-			if (move->piece == peon && abs(move->to - move->from) == 16) {
+			if (move->piece == peon &&
+			    (move->to > move->from ? move->to - move->from : move->from - move->to) == 16) {
 				if (c == blancas)
 					t->enPassantSquare = move->to - 8;
 				else
@@ -1828,6 +1865,7 @@ void proccesUCICommands(char command[4096], Tablero * t) {
 		memset(tt, 0, sizeof(tt));
 		memset(history, 0, sizeof(history));
 		memset(killerMoves, 0, sizeof(killerMoves));
+		positionHashCount = 0;
 		return;
 	}
 
@@ -1866,6 +1904,8 @@ void proccesUCICommands(char command[4096], Tablero * t) {
 		if (strcmp(secondCommand, "startpos") == 0) {
 			initBoard(t);
 			colorToMove = blancas;
+			positionHashCount = 0;
+			positionHashes[positionHashCount++] = t->hash;
 			char * movesToken = strtok(NULL, " ");
 			if (movesToken && strcmp(movesToken, "moves") == 0) {
 				char * move = strtok(NULL, " ");
@@ -1912,6 +1952,7 @@ void proccesUCICommands(char command[4096], Tablero * t) {
 					}
 					Move newMove = {from, to, piece, capture, special, promo};
 					makeMove(&newMove, t, colorToMove);
+					positionHashes[positionHashCount++] = t->hash;
 					move = strtok(NULL, " ");
 					colorToMove = !colorToMove;
 				}
@@ -1923,6 +1964,7 @@ void proccesUCICommands(char command[4096], Tablero * t) {
 
 		if (strcmp(secondCommand, "fen") == 0) {
 			memset(t, 0, sizeof(Tablero));
+			positionHashCount = 0;
 			char * fenString = strtok(NULL, " \t\n\r\f\v");
 			if (!fenString)
 				return;
@@ -2018,6 +2060,7 @@ void proccesUCICommands(char command[4096], Tablero * t) {
 					}
 					Move newMove = {from, to, piece, capture, special, promo};
 					makeMove(&newMove, t, colorToMove);
+					positionHashes[positionHashCount++] = t->hash;
 					move = strtok(NULL, " ");
 					colorToMove = !colorToMove;
 				}
@@ -2218,35 +2261,6 @@ static inline void moveToMoveSort(moveLists * input, moveSort output[], int dept
 	for (int i = 0; i < input->count; i++) {
 		output[i] = scoreMoveForSorting(&input->moves[i], depth);
 	}
-}
-static inline void swapMoveSort(moveSort * a, moveSort * b) {
-	moveSort temp = *a;
-	*a = *b;
-	*b = temp;
-}
-static inline int partition(moveSort arr[], int low, int high) {
-
-	// Choose the pivot
-	int pivot = arr[high].sortingScore;
-
-	// Index of smaller element and indicates
-	// the right position of pivot found so far
-	int i = low - 1;
-
-	// Traverse arr[low..high] and move all smaller
-	// elements to the left side. Elements from low to
-	// i are smaller after every iteration
-	for (int j = low; j <= high - 1; j++) {
-		if (arr[j].sortingScore > pivot) {
-			i++;
-			swapMoveSort(&arr[i], &arr[j]);
-		}
-	}
-
-	// Move pivot after smaller elements and
-	// return its position
-	swapMoveSort(&arr[i + 1], &arr[high]);
-	return i + 1;
 }
 static inline int compareMoveSort(const void * a, const void * b) {
 	const moveSort * ma = (const moveSort *)a;
@@ -2496,12 +2510,10 @@ void testTT() {
 	Tablero t;
 	initBoard(&t);
 	struct timespec start, end;
-	uint64_t nodes_before, nodes_after;
-
 	// First search
 	nodes = 0;
 	clock_gettime(CLOCK_MONOTONIC, &start);
-	moveScore best1 = negaMaxFixedDepth(&t, blancas, 5);
+	negaMaxFixedDepth(&t, blancas, 5);
 	clock_gettime(CLOCK_MONOTONIC, &end);
 	double elapsed1 = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
 	printf("First: nodes %lld time %.3f s nps %.0f\n", nodes, elapsed1, nodes / elapsed1);
@@ -2509,7 +2521,7 @@ void testTT() {
 	// Second search (same position, table now populated)
 	nodes = 0;
 	clock_gettime(CLOCK_MONOTONIC, &start);
-	moveScore best2 = negaMaxFixedDepth(&t, blancas, 5);
+	negaMaxFixedDepth(&t, blancas, 5);
 	clock_gettime(CLOCK_MONOTONIC, &end);
 	double elapsed2 = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
 	printf("Second: nodes %lld time %.3f s nps %.0f\n", nodes, elapsed2, nodes / elapsed2);
