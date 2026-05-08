@@ -1,4 +1,4 @@
-CC = clang
+CC = gcc
 CFLAGS = -I. -Wall
 
 SRCS = *.c
@@ -6,7 +6,7 @@ OBJS = $(SRCS:.c=.o)
 TARGET = supplyCat
 
 $(TARGET): $(OBJS)
-	$(CC) $(OBJS) -o $(TARGET)
+	$(CC) $(OBJS) -O3 -o $(TARGET)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
