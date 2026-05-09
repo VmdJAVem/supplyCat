@@ -1,0 +1,37 @@
+[
+  {
+    "directory": "/home/arkar/programming/supplyCat",
+    "command": "gcc -I. -Wall -O3 -c main.c -o main.o",
+    "file": "main.c"
+  },
+  {
+    "directory": "/home/arkar/programming/supplyCat",
+    "command": "gcc -I. -Wall -O3 -c src/bitboard.c -o src/bitboard.o",
+    "file": "src/bitboard.c"
+  },
+  {
+    "directory": "/home/arkar/programming/supplyCat",
+    "command": "gcc -I. -Wall -O3 -c src/board.c -o src/board.o",
+    "file": "src/board.c"
+  },
+  {
+    "directory": "/home/arkar/programming/supplyCat",
+    "command": "gcc -I. -Wall -O3 -c src/eval.c -o src/eval.o",
+    "file": "src/eval.c"
+  },
+  {
+    "directory": "/home/arkar/programming/supplyCat",
+    "command": "gcc -I. -Wall -O3 -c src/movegen.c -o src/movegen.o",
+    "file": "src/movegen.c"
+  },
+  {
+    "directory": "/home/arkar/programming/supplyCat",
+    "command": "gcc -I. -Wall -O3 -c src/search.c -o src/search.o",
+    "file": "src/search.c"
+  },
+  {
+    "directory": "/home/arkar/programming/supplyCat",
+    "command": "gcc -I. -Wall -O3 -c src/uci.c -o src/uci.o",
+    "file": "src/uci.c"
+  }
+]
