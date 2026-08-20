@@ -13,10 +13,22 @@ int main() {
 	initAttackTables();
 	initZobrist();
 
+	while (true) {
+		if (inputAvaliable()) {
+			char buffer[4096];
+			if (fgets(buffer, sizeof(buffer), stdin)) {
+				proccesUCICommands(buffer, &tablero);
+			}
+		} else {
+			struct timespec ts = {0, 1000000};
+			nanosleep(&ts, NULL);
+		}
+	}
+	/*
 	testZobrist();
 	testTT();
 	testNPS();
 	testUnmakeAll();
-
+*/
 	return 0;
 }
